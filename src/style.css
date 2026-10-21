@@ -170,7 +170,7 @@ h1{font-family:var(--serif);font-weight:700;font-size:clamp(32px,5.2vw,50px);lin
 .br-meta{margin:0 0 0 26px;font-size:12px;color:var(--muted)}
 
 /* overview figure */
-.overview{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:8px 28px;align-items:start;margin:4px auto 26px;font-family:var(--sans)}
+.overview{display:grid;grid-template-columns:minmax(0,1fr);gap:8px 28px;align-items:start;margin:4px auto 26px;font-family:var(--sans)}
 .ov-art{min-width:0}.svg-narrow{display:none}
 .ov-art svg{display:block;width:100%;height:auto}
 .ov-key{font-size:14px;line-height:1.4;padding-top:6px;border-top:2px solid var(--ink)}
@@ -318,13 +318,18 @@ body.app{display:flex;flex-direction:column;height:100dvh;overflow:hidden;font-f
 .strip figcaption{font-size:13px;color:#555;margin-top:.35rem}
 .legend .lbr{list-style:none;margin:.4rem 0 0;padding:0;display:grid;gap:2px;font-size:13px}
 .legend .lbr .ringn{display:inline-grid;place-items:center;width:18px;height:18px;border:2px solid #111;border-radius:50%;font-size:12px;font-weight:700;line-height:1}
-@media (max-width:640px){
+/* bottom sheet: fixed height, slid with a transform (no layout animation); --peek is the visible height when closed */
+@media (max-width: 899px){
   .app #graph{height:calc(100% - var(--peek,52px))}
-  .sheet:not(.open){height:var(--peek,52px)}
-  .sheet.open{height:max(50dvh,var(--peek,52px))}
+  .sheet,.sheet.open{height:max(50dvh,var(--peek,52px));transition:transform .2s ease;will-change:transform}
+  .sheet:not(.open){transform:translateY(calc(max(50dvh,var(--peek,52px)) - var(--peek,52px)))}
+  .sheet.open{transform:none}
+  .sheet:not(.open) .panel{padding-bottom:calc(max(50dvh,var(--peek,52px)) - var(--peek,52px))}
   .sheet-open.app #graph{height:calc(100% - max(50dvh,var(--peek,52px)))}
   .sheet.peek:not(.open) .tabs{display:flex}
   .sheet.peek:not(.open) .panel{display:block}
-  .zoom{bottom:calc(var(--peek,52px) + 10px);flex-direction:row}
-  .sheet-open .zoom{bottom:calc(max(50dvh,var(--peek,52px)) + 10px)}
+  .zoom{bottom:calc(var(--peek,52px) + 10px)}
+  .sheet-open .zoom{display:none}
+  body.app:not(.sheet-ready) .sheet,body.app:not(.sheet-ready) .zoom{visibility:hidden}
 }
+@media (max-width:640px){ .zoom{flex-direction:row} }

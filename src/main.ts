@@ -685,12 +685,13 @@ async function main() {
   function fitSheet() {
     const root = document.documentElement;
     root.style.removeProperty('--peek'); sheet.classList.remove('peek'); homeMemo = null;
-    if (!narrowMQ.matches || state.showAll) return;
+    if (!narrowMQ.matches || state.showAll) { document.body.classList.add('sheet-ready'); return; }
     home(); const spare = container.clientHeight - (homeBottom + 64);
     if (spare >= 120) { root.style.setProperty('--peek', `${Math.round(52 + spare)}px`); sheet.classList.add('peek'); }
     homeMemo = null;
     if (renderer) { renderer.resize(); cam?.setState(home()); }
     refresh();
+    document.body.classList.add('sheet-ready');
   }
   fitSheet();
   let rsz = 0; window.addEventListener('resize', () => { cancelAnimationFrame(rsz); rsz = requestAnimationFrame(fitSheet); });

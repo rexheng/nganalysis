@@ -1,5 +1,5 @@
 import type { Data } from './types';
-import { esc, index, numWord, blocName, pct, pctCut, srcLabel, LETTERS, plural, surname, listJoin, marginLabel, weakPct, slateShares, nearMisses, intactRange } from './text';
+import { esc, index, numWord, blocName, pct, pctCut, srcLabel, LETTERS, plural, surname, listJoin, marginLabel, weakPct, slateShares, nearMisses, intactRange, robustBridges } from './text';
 export { srcLabel } from './text';
 
 const nProbOf = (d: Data) => d.edges.filter((e) => e.kind === 'endorsement' && /probable/i.test(e.conf || '')).length;
@@ -36,7 +36,7 @@ export function methodsHtml(d: Data): string {
 <li><strong>Endorsement:</strong> a name on a candidate’s endorsement page, on an organization’s own list or in a candidate statement in the <a href="${esc(vig)}" rel="noopener" target="_blank">county voter guide</a>, as of ${esc(prettyDate(S.accessDates[0]))}. Where an organization publishes its own list, that list is the source. Excluded: the guide’s “I refer to the following residents” lists${S.nUnverifiedLeads ? ` and ${S.nUnverifiedLeads} claims found only on aggregator sites` : ''}.</li>
 ${nProb ? `<li><strong>Probable:</strong> ${probWho}. ${notes.length === 1 ? esc(probNote(notes[0], probE.length > 1)) : ''} Every result is also computed without them; both graphics draw them in blue.</li>` : ''}
 <li><strong>Coalitions:</strong> Louvain clustering (networkx), run ${S.nRuns.toLocaleString('en-US')} times on shuffled input; endorsers of a single candidate are left out.${S.poolsMinAgree ? ` Either half of the runs gives the same groups.` : ''}${ix.slate ? ` The slate counts as one participant, linked to its ${numWord(ix.slateMembers.length)} members.` : ''}</li>
-<li><strong>Spanning:</strong> the number of coalitions in which an endorser backs a candidate; ties share a rank. Tested by ${B.resamples} reruns that each drop a random ${pct(B.dropShare)} of endorsements, by dropping each endorsement in turn, and without the probable ones.</li>
+<li><strong>Spanning:</strong> the number of coalitions in which an endorser backs a candidate; ties share a rank. Tested by ${B.resamples} reruns that each drop a random ${pct(B.dropShare)} of endorsements, by dropping each endorsement in turn, and without the probable ones.${(() => { const r = robustBridges(d); return r.length ? ` All ${numWord(r.length)} named ranks survive every test (top ${B.topK} in at least ${Math.floor(Math.min(...r.map((b) => b.topReach)) * 100)}% of reruns).` : ''; })()}</li>
 <li><strong>Caveat:</strong> campaign pages are self-reported and range from zero to ${Math.max(...d.nodes.filter((n) => n.isTarget).map((n) => n.inDeg))} names, so long lists look more central. An endorsement is a public signal, not money or votes.</li>
 </ul>
 <h2 id="data">Data</h2>
