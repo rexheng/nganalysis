@@ -29,7 +29,7 @@ def on_color(h): return '#ffffff' if (1.05 / (lum(h) + 0.05)) >= 4.5 else '#1111
 
 def short_name(n):
     if n['type'] == 'Slate': return n['name'].replace('Berkeley ', '')
-    parts = n['name'].replace('"', '').split()
+    parts = n['name'].replace('"', '').replace('\u201c', '').replace('\u201d', '').split()
     return parts[-1]
 
 def render(d, W, fs, narrow):
@@ -79,7 +79,9 @@ def render(d, W, fs, narrow):
             else:
                 cs, ct = N[e['s']]['community'], N[e['t']]['community']
                 cross = cs != ct
-                el.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="{"#3d3d3d" if cross else "#8c8c8c"}" stroke-opacity="{.32 if cross else .3}" stroke-width="{.9 if narrow else .8}"/>')
+                prob = 'probable' in (e.get('conf') or '').lower()
+                dash = f' stroke-dasharray="1 {4 if narrow else 3}" stroke-linecap="round"' if prob else ''
+                el.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="{"#3d3d3d" if cross else "#8c8c8c"}" stroke-opacity="{.32 if cross else .3}" stroke-width="{(1.6 if narrow else 1.3) if prob else (.9 if narrow else .8)}"{dash}/>')
     out.insert(0, '<g>' + ''.join(el) + '</g>')
     # nodes
     occupied = list(occupied_pre)   # rects (x0,y0,x1,y1)
@@ -92,8 +94,8 @@ def render(d, W, fs, narrow):
     out.append('<g>' + ''.join(nl) + '</g>')
     # bridges: top robust by reach rank
     br = [b for b in d['bridges'] if b.get('robustReach')]
-    br.sort(key=lambda b: (b['rankReach'], N[b['id']]['name']))
-    top = br[:3]
+    br.sort(key=lambda b: (b['rankReach'], -b['deg'], b['id']))   # same order as text.ts robustBridges()
+    top = br[:10]
     marks = []
     for i, b in enumerate(top):
         x, y = P[b['id']]; r = rad(N[b['id']]) + fs * 0.35
@@ -129,11 +131,12 @@ def render(d, W, fs, narrow):
         lbl = f'{i + 1}' if narrow else f'{i + 1} {n["name"]}'
         p = place(lbl, x, y, rad(n) + fs * 0.35, fs, True, True)
         labels.append((p, lbl, True))
-    tg = sorted([n for n in core if n['isTarget'] and not n.get('memberOf')], key=lambda n: -n['inDeg'])
-    for n in tg:
+    tg = sorted([n for n in core if n['isTarget']], key=lambda n: (bool(n.get('analysisEndorser')), bool(n.get('memberOf')), -n['inDeg']))
+    for n in tg:   # every candidate is labelled (forced placement); a withdrawn one is marked as such
         x, y = P[n['id']]
-        p = place(short_name(n), x, y, rad(n), fs * 0.92, False, False)
-        if p: labels.append((p, short_name(n), False))
+        lbl = short_name(n) + (' (withdrew)' if n.get('analysisEndorser') else '')
+        p = place(lbl, x, y, rad(n), fs * 0.92, False, True)
+        if p: labels.append((p, lbl, False))
     tl = []
     for p, lbl, bold in labels:
         if not p: continue

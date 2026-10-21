@@ -78,6 +78,36 @@ with sync_playwright() as p:
         pg.locator('.overlap-sec').screenshot(path=f'{OUT}/{name}-overlap.png')
         pg.locator('.overview').screenshot(path=f'{OUT}/{name}-overview.png')
         if name in ('d1440', 'm390'): pg.locator('.methods').screenshot(path=f'{OUT}/{name}-methods.png')
+        # round-3 checks
+        c['jump_link'] = pg.evaluate("(document.querySelector('.jump a')||{}).getAttribute ? document.querySelector('.jump a').getAttribute('href') : null")
+        c['heatmap_region'] = pg.evaluate("(()=>{const h=document.getElementById('heatmap');return {tabindex:h.getAttribute('tabindex'),role:h.getAttribute('role'),label:h.getAttribute('aria-label')}})()")
+        pg.click('[data-view=coalitions]'); pg.wait_for_timeout(300); ex(); pg.wait_for_timeout(300)
+        c['unlabelled_candidates'] = pg.evaluate("(()=>{const L=new Set(window.__labels||[]);return window.__test.cands().filter(id=>!L.has(id))})()")
+        c['zero_cells'] = pg.evaluate("[...document.querySelectorAll('#overlap td[data-a]')].filter(t=>t.textContent.trim()==='0').length")
+        cell = pg.locator('#overlap td[data-a]').nth(3); cell.scroll_into_view_if_needed(); pg.wait_for_timeout(200)
+        if mob: cell.tap()
+        else: cell.click()
+        pg.wait_for_timeout(300)
+        c['ovtip_after_tap'] = pg.evaluate("(()=>{const t=document.getElementById('ovtip');return {visible:!t.hidden,sheet:t.classList.contains('sheet'),text:t.textContent.slice(0,80)}})()")
+        pg.screenshot(path=f'{OUT}/{name}-overlap-tap.png')
+        if mob: pg.locator('#ovtip .ovx').tap()
+        else: pg.locator('#ovtip .ovx').click()
+        pg.wait_for_timeout(200); c['ovtip_closed'] = pg.evaluate("document.getElementById('ovtip').hidden")
+        # pill: hidden while the panel is on screen
+        pg.fill('#q', 'Green Party'); pg.wait_for_timeout(200); pg.keyboard.press('Enter'); pg.wait_for_timeout(700)
+        pg.evaluate("document.getElementById('graph').scrollIntoView({block:'start'})"); pg.wait_for_timeout(500)
+        p1 = pg.evaluate("!document.getElementById('pill').hidden")
+        pg.evaluate("document.getElementById('panel').scrollIntoView({block:'start'})"); pg.wait_for_timeout(500)
+        p2 = pg.evaluate("!document.getElementById('pill').hidden")
+        c['pill'] = {'visible_over_graph': p1, 'visible_over_panel': p2}
+        pg.evaluate("document.getElementById('graph').scrollIntoView({block:'start'})"); pg.wait_for_timeout(400)
+        pg.screenshot(path=f'{OUT}/{name}-selected-labels.png')
+        c['unlabelled_neighbours'] = pg.evaluate("(()=>{const L=new Set(window.__labels||[]);return window.__test.nbrs().filter(id=>!L.has(id)).length})()")
+        pg.keyboard.press('Escape'); pg.wait_for_timeout(300)
+        if name in ('d1440', 'm390'):
+            pg.add_script_tag(path='/tmp/axe-pkg/node_modules/axe-core/axe.min.js')
+            res = pg.evaluate("axe.run(document, {runOnly: {type: 'tag', values: ['wcag2a','wcag2aa','wcag21a','wcag21aa','best-practice']}}).then(r => r.violations.map(v => ({id: v.id, impact: v.impact, n: v.nodes.length, sample: v.nodes.slice(0,3).map(x => x.target.join(' '))})))")
+            c['axe_violations'] = res
         # deep link
         pg.goto(URL + f'#view=bridges&node={nid}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(700)
         c['deeplink'] = pg.locator('#panel h3').first.inner_text()

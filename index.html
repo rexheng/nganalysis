@@ -22,6 +22,7 @@
   <p class="eyebrow">Berkeley endorsements, November 2026</p>
   <h1><!--HEADLINE--></h1>
   <p class="dek"><!--DEK--></p>
+  <p class="jump"><a href="#explore">Jump to the interactive graph ↓</a></p>
 </article>
 <figure class="overview wrap-wide" aria-labelledby="ov-cap">
   <div class="ov-art" role="img" aria-labelledby="ov-alt">
@@ -71,12 +72,14 @@
 
 <section class="matrix-sec wrap-wide" aria-labelledby="hmh">
   <h2 id="hmh">How often are two candidates grouped together?</h2>
-  <p class="sub">Share of <!--SEEDS--> clustering runs (percent) that put each pair in the same group. Outlined cells are pairs inside a robust coalition (every pair at least <!--TPCT-->). Rows and columns are ordered by coalition; unattached candidates come last.</p>
+  <p class="sub">Share of <!--SEEDS--> clustering runs (percent) that put each pair in the same group. Outlined cells are pairs inside a coalition (every pair at least <!--TPCT--> in every batch). Rows and columns are ordered by coalition; unattached candidates come last. A small “s” marks Right to Housing slate members.</p>
+  <p class="scrollhint" aria-hidden="true">Scroll sideways for more columns →</p>
   <div id="heatmap" class="mwrap"></div>
 </section>
 <section class="matrix-sec overlap-sec wrap-wide" aria-labelledby="ovh">
   <h2 id="ovh">How much do endorser lists overlap?</h2>
-  <p class="sub">By default, shared endorsers as a percent of everyone who endorses either candidate (Jaccard similarity), so long lists do not dominate. Hover, tap or focus a cell for names.</p>
+  <p class="sub">By default, shared endorsers as a percent of everyone who endorses either candidate (Jaccard similarity), so long lists do not dominate. Hover, tap or focus a cell for names. “&lt;1” means under half a percent; blank cells share no endorsers.</p>
+  <p class="scrollhint" aria-hidden="true">Scroll sideways for more columns →</p>
   <div id="overlap" class="mwrap"></div>
 </section>
 

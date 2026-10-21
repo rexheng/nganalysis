@@ -19,7 +19,7 @@ function bakeText(): Plugin {
         .replace('<!--OVERVIEW_WIDE-->', svg('wide')).replace('<!--OVERVIEW_NARROW-->', svg('narrow'))
         .replace('<!--OVERVIEW_KEY-->', t.overviewKey).replace('<!--OVERVIEW_ALT-->', esc(t.overviewAlt))
         .replace('<!--GRAPH_SUMMARY-->', esc(t.graphSummary))
-        .replace('<!--SEEDS-->', String(d.summary.seeds)).replace('<!--TPCT-->', `${Math.round(d.summary.robustThreshold * 100)}%`)
+        .replace('<!--SEEDS-->', d.summary.nRuns.toLocaleString('en-US')).replace('<!--TPCT-->', `${Math.round(d.summary.robustThreshold * 100)}%`)
         .replace('<!--METHODS-->', methodsHtml(d));
     },
   };
