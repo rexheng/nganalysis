@@ -565,7 +565,12 @@ async function main() {
 }
 
 // ---------- co-assignment heatmap (real table) ----------
-function heat(v: number) { const l = 98 - v * 74; return `hsl(222 ${35 + v * 35}% ${l}%)`; }
+function heat(v: number) {   // returns hex so contrast() can read it
+  const h = 222 / 360, sat = (35 + v * 35) / 100, l = (98 - v * 74) / 100;
+  const q = l < 0.5 ? l * (1 + sat) : l + sat - l * sat, p = 2 * l - q;
+  const f = (t: number) => { t = (t + 1) % 1; const c = t < 1 / 6 ? p + (q - p) * 6 * t : t < 1 / 2 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p; return Math.round(c * 255).toString(16).padStart(2, '0'); };
+  return `#${f(h + 1 / 3)}${f(h)}${f(h - 1 / 3)}`;
+}
 function renderHeatmap(d: Data) {
   const ix = index(d);
   const order = [...d.communities.flatMap((c) => c.targets), ...d.loose.map((l) => l.id)];
