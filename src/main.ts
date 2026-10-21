@@ -584,7 +584,7 @@ function renderHeatmap(d: Data) {
       const ca = N(a).community, cb = N(b).community;
       const same = ca >= 0 && ca === cb;
       if (a === b) { h += `<td class="diag${same ? ' blk' : ''}" ${same ? `style="--bc:${commColor(ca)}"` : ''}><span class="sr">same candidate</span></td>`; continue; }
-      const v = ix.together(a, b); const bg = heat(v); const fg = contrast('#ffffff', bg) >= 4.5 ? '#fff' : '#111';
+      const v = ix.together(a, b); const bg = heat(v); const fg = contrast('#ffffff', bg) >= contrast('#000000', bg) ? '#fff' : '#000';
       h += `<td class="${same ? 'blk' : ''}" style="background:${bg};color:${fg};${same ? `--bc:${commColor(ca)}` : ''}" title="${esc(N(a).name)} & ${esc(N(b).name)}: together in ${pct(v)} of runs">${Math.round(v * 100)}</td>`;
     }
     h += '</tr>';
@@ -616,7 +616,7 @@ function renderOverlap(d: Data) {
         if (j >= i) { h += '<td class="void"></td>'; return; }
         const o = ov.get(a + '|' + b);
         if (!o) { h += '<td class="zero"><span class="sr">none</span></td>'; return; }
-        const t = Math.sqrt(o[metric] / max); const bg = heat(t); const fg = contrast('#ffffff', bg) >= 4.5 ? '#fff' : '#111';
+        const t = Math.sqrt(o[metric] / max); const bg = heat(t); const fg = contrast('#ffffff', bg) >= contrast('#000000', bg) ? '#fff' : '#000';
         h += `<td tabindex="0" data-a="${esc(a)}" data-b="${esc(b)}" style="background:${bg};color:${fg}">${fmt(o)}</td>`;
       });
       h += '</tr>';
