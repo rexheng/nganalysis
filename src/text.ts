@@ -26,11 +26,13 @@ export function index(d: Data) {
   const byName = new Map<string, GNode>(d.nodes.map((n) => [n.name, n]));
   const out = new Map<string, string[]>(); const inn = new Map<string, string[]>();
   for (const e of d.edges) {
+    if (e.kind === 'member') continue;
     if (!out.has(e.s)) out.set(e.s, []); out.get(e.s)!.push(e.t);
     if (!inn.has(e.t)) inn.set(e.t, []); inn.get(e.t)!.push(e.s);
   }
   const slate = byName.get(SLATE);
-  const slateMembers = d.edges.filter((e) => e.rel === 'Slate member').map((e) => e.t);
+  const ix_isSlate = (id: string) => !slate || id === slate.id;
+  const slateMembers = d.edges.filter((e) => e.kind === 'member' && ix_isSlate(e.t)).map((e) => e.s);
   return { byId, byName, out, inn, slate, slateMembers };
 }
 

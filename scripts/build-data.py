@@ -39,11 +39,31 @@ args = ap.parse_args()
 C = args.clean
 os.makedirs(args.out, exist_ok=True)
 
-def rd(name):
-    with open(os.path.join(C, name), newline='', encoding='utf-8') as f:
+def rd(name, required=True):
+    p = os.path.join(C, name)
+    if not os.path.exists(p):
+        if required: raise SystemExit(f'missing {p}')
+        return []
+    with open(p, newline='', encoding='utf-8-sig') as f:
         return list(csv.DictReader(f))
 
+def _k(s): return re.sub(r'[^a-z0-9]', '', (s or '').lower())
+def col(row, *names, default=''):
+    """Tolerant column getter: exact key, then normalized-key match."""
+    for n in names:
+        if n in row and row[n] is not None: return row[n].strip()
+    nk = {_k(k): k for k in row}
+    for n in names:
+        k = nk.get(_k(n))
+        if k is not None and row[k] is not None: return row[k].strip()
+    return default
+def has(rows, *names):
+    if not rows: return False
+    ks = {_k(k) for k in rows[0]}
+    return any(_k(n) in ks for n in names)
+
 E = rd('endorsements.csv'); EN = rd('endorsers.csv'); CA = rd('candidates.csv')
+SM = rd('slate_members.csv', required=False); ES = rd('edge_sources.csv', required=False)
 RACE_ORDER = ['Auditor', 'Council D1', 'Council D4', 'Council D7', 'Council D8', 'Rent Board', 'School Board']
 SLATE = 'Berkeley Right to Housing slate'
 
@@ -52,44 +72,108 @@ def valid_url(u):
     try:
         p = urlparse(u); return p.scheme in ('http', 'https') and bool(p.netloc) and ' ' not in u
     except Exception: return False
+def day(s):
+    m = re.match(r'(\d{4}-\d{2}-\d{2})', s or ''); return m.group(1) if m else (s or '')
+def mkid(name): return 'N' + hashlib.md5(name.lower().encode()).hexdigest()[:7]
 
 # ---------- nodes ----------
-nodes = {}            # id -> dict
-name2id = {}
+nodes = {}; name2id = {}
+def ensure(name, nid=None, typ='', title=''):
+    if name in name2id: return name2id[name]
+    nid = nid or mkid(name)
+    name2id[name] = nid
+    nodes.setdefault(nid, dict(id=nid, name=name, type=typ or 'Individual', title=title, variants=[]))
+    return nid
 for r in EN:
-    nid = r['endorser_id']; name2id[r['Endorser']] = nid
-    nodes[nid] = dict(id=nid, name=r['Endorser'], type=r['Endorser type'], title=r['Title/affiliation (most common)'],
-                      variants=[v for v in r['Name variants seen'].split(' | ') if v])
-cand_names = []
-cand_info = {}
+    name = col(r, 'Endorser', 'name'); nid = col(r, 'endorser_id', 'id') or mkid(name)
+    name2id[name] = nid
+    nodes[nid] = dict(id=nid, name=name, type=col(r, 'Endorser type', 'type') or 'Individual',
+                      title=col(r, 'Title/affiliation (most common)', 'Title/affiliation', 'title'),
+                      variants=[v.strip() for v in re.split(r'\s*\|\s*', col(r, 'Name variants seen', 'variants')) if v.strip()])
+cand_names = []; cand_info = {}
 for r in CA:
-    n = r['Candidate']; cand_names.append(n)
-    nid = name2id.get(n) or ('C' + hashlib.md5(n.lower().encode()).hexdigest()[:7])
-    name2id[n] = nid
-    nd = nodes.setdefault(nid, dict(id=nid, name=n, type='Candidate', title='', variants=[]))
-    nd['type'] = 'Slate' if n == SLATE else 'Candidate'
-    nd['isCandidate'] = n != SLATE
+    n = col(r, 'Candidate', 'name')
+    if not n: continue
+    cand_names.append(n)
+    nid = ensure(n, col(r, 'endorser_id', 'candidate_id') or None)
+    nd = nodes[nid]
+    status = col(r, 'Status', 'status')
+    if n == SLATE or 'slate' in n.lower(): nd['type'] = 'Slate'
+    elif nd['type'] == 'Candidate (withdrawn)' or 'withdrawn' in status.lower(): nd['type'] = 'Candidate (withdrawn)'
+    else: nd['type'] = 'Candidate'
+    nd['isCandidate'] = nd['type'] != 'Slate'
     nd['isTarget'] = True
-    nd['race'] = r['Race']
-    nd['campaignUrl'] = r['Campaign URL']; nd['endorsementsPage'] = r['Endorsements page']
-    nd['candNotes'] = r['Notes']
-    cand_info[n] = r
+    nd['race'] = col(r, 'Race', 'race')
+    nd['campaignUrl'] = col(r, 'Campaign URL', 'campaign_url'); nd['endorsementsPage'] = col(r, 'Endorsements page', 'endorsements_page_url')
+    nd['candNotes'] = col(r, 'Notes', 'notes')
+    if status: nd['status'] = status
+    cand_info[n] = dict(Race=nd['race'])
+
+# ---------- sources (optional separate table) ----------
+def src_from(r):
+    u = col(r, 'Source', 'source_url', 'url')
+    return dict(u=u, ty=col(r, 'Source type', 'source_type', 'source_kind'), pg=col(r, 'voter_guide_page', 'Voter guide page', 'page'),
+                snap=col(r, 'snapshot_path', 'Snapshot path'), at=day(col(r, 'accessed_at', 'Date accessed', 'source_accessed_date')))
+es_by_edge = collections.defaultdict(list); es_by_pair = collections.defaultdict(list)
+for r in ES:
+    sr = src_from(r)
+    if not sr['u']: continue
+    eid = col(r, 'edge_id', 'endorsement_id')
+    if eid: es_by_edge[eid].append(sr)
+    s_ = col(r, 'endorser_id') or name2id.get(col(r, 'Endorser', 'endorser'), '')
+    t_ = col(r, 'Endorses', 'target', 'candidate', 'target_name')
+    if s_ and t_: es_by_pair[(s_, t_)].append(sr)
 
 # ---------- edges ----------
 edges = []; bad_urls = []
-for i, r in enumerate(E):
-    s = r['endorser_id']; t = name2id.get(r['Endorses'])
-    if t is None: raise SystemExit(f"Unknown target {r['Endorses']!r}")
-    if s not in nodes: raise SystemExit(f"Unknown endorser id {s}")
-    srcs = [u.strip() for u in r['Source'].split('|') if u.strip()]
-    for u in srcs:
-        if not valid_url(u): bad_urls.append((r['Endorser'], r['Endorses'], u))
-    stypes = [x.strip() for x in r['Source type'].split('+')]
-    edges.append(dict(id=f'e{i}', s=s, t=t, rel=r['Relationship'], rank=r['Ranking'], formality=r['Formality'],
-                      title=r['Title/affiliation'], src=srcs, stype=stypes, date=r['Date accessed'],
-                      check=r['Needs check'], asw=r['Name(s) as written']))
-    # Edge-specific title: if node lacks one, keep the first seen
-    if not nodes[s]['title'] and r['Title/affiliation']: nodes[s]['title'] = r['Title/affiliation']
+def add_edge(s, t, kind, r, i):
+    ename = nodes[s]['name']; tname = nodes[t]['name']
+    eid = col(r, 'edge_id', 'endorsement_id')
+    srcs = es_by_edge.get(eid) if eid else None
+    if not srcs: srcs = es_by_pair.get((s, tname)) or es_by_pair.get((s, t))
+    if not srcs:
+        urls = [u.strip() for u in re.split(r'\s*\|\s*', col(r, 'Source', 'source_url')) if u.strip()]
+        types = [x.strip() for x in re.split(r'\s*[+|]\s*', col(r, 'Source type', 'source_type')) if x.strip()]
+        base = src_from(r)
+        srcs = [dict(base, u=u, ty=(types[j] if j < len(types) else (types[0] if types else ''))) for j, u in enumerate(urls)]
+    # de-dupe identical url+page
+    seen = set(); uniq = []
+    for sr in srcs:
+        key = (sr['u'], sr.get('pg', ''))
+        if key in seen: continue
+        seen.add(key); uniq.append(sr)
+    for sr in uniq:
+        if not valid_url(sr['u']): bad_urls.append((ename, tname, sr['u']))
+    rel = col(r, 'Relationship', 'relationship') or ('Slate member' if kind == 'member' else 'Endorses')
+    edges.append(dict(id=f'e{i}', s=s, t=t, kind=kind, rel=rel, rank=col(r, 'Ranking', 'rank'), formality=col(r, 'Formality', 'formality'),
+                      title=col(r, 'Title/affiliation', 'title'), src=uniq,
+                      date=next((x['at'] for x in uniq if x['at']), day(col(r, 'accessed_at', 'Date accessed'))),
+                      check=col(r, 'Needs check', 'needs_check'), asw=col(r, 'Name(s) as written', 'name_as_written')))
+i = 0
+for r in E:
+    sname = col(r, 'Endorser', 'endorser'); s = col(r, 'endorser_id') or ''
+    if s and s not in nodes:
+        nodes[s] = dict(id=s, name=sname, type=col(r, 'Endorser type') or 'Individual', title='', variants=[]); name2id.setdefault(sname, s)
+    if not s: s = ensure(sname, typ=col(r, 'Endorser type'))
+    tname = col(r, 'Endorses', 'target', 'candidate')
+    t = name2id.get(tname) or ensure(tname, typ='Candidate')
+    rel = col(r, 'Relationship', 'relationship')
+    kind = 'member' if rel.lower().startswith('slate member') or rel.lower().startswith('member') else 'endorsement'
+    if kind == 'member':   # old format: slate -> member row; normalise to member -> slate
+        add_edge(t, s, 'member', r, i)
+    else:
+        add_edge(s, t, kind, r, i)
+    if not nodes[s]['title'] and col(r, 'Title/affiliation'): nodes[s]['title'] = col(r, 'Title/affiliation')
+    i += 1
+for r in SM:
+    keys = list(r.keys())
+    sl = col(r, 'Slate', 'slate', 'slate_name') or SLATE
+    mem = col(r, 'Member', 'member', 'Candidate', 'candidate', 'member_name')
+    if not mem: continue
+    sid = name2id.get(sl) or ensure(sl, typ='Slate'); mid = name2id.get(mem) or ensure(mem, typ='Candidate')
+    if any(e['kind'] == 'member' and e['s'] == mid and e['t'] == sid for e in edges): continue
+    rr = dict(r); rr.setdefault('Relationship', 'Slate member')
+    add_edge(mid, sid, 'member', rr, i); i += 1
 if bad_urls: raise SystemExit(f'Invalid source URLs: {bad_urls[:5]} ({len(bad_urls)})')
 
 # keep only nodes that participate in at least one edge, plus all candidates
@@ -97,13 +181,19 @@ used = {e['s'] for e in edges} | {e['t'] for e in edges} | {name2id[n] for n in 
 nodes = {k: v for k, v in nodes.items() if k in used}
 for nd in nodes.values():
     nd.setdefault('isCandidate', False); nd.setdefault('isTarget', False)
-    if nd['type'] == 'Candidate' and not nd['isCandidate']:
+    if nd['type'].startswith('Candidate') and not nd['isCandidate']:
         nd['typeNote'] = 'Listed as a candidate for another office; not on this ballot in the races covered here'
+for e in edges:
+    if e['kind'] == 'member': nodes[e['s']]['memberOf'] = e['t']
+    if e['kind'] == 'member' and nodes[e['t']]['type'] != 'Slate': nodes[e['t']]['type'] = 'Slate'
 
 # ---------- graphs ----------
 D = nx.DiGraph(); D.add_nodes_from(nodes)
-for e in edges: D.add_edge(e['s'], e['t'])
+for e in edges:
+    if e['kind'] == 'endorsement': D.add_edge(e['s'], e['t'])
 U = nx.Graph(D.to_undirected())
+for e in edges:
+    if e['kind'] == 'member': U.add_edge(e['s'], e['t'])   # membership ties count in the structure
 deg = dict(U.degree())
 cand_ids = {name2id[n] for n in cand_names}
 leaves = {n for n in U if deg[n] == 1 and n not in cand_ids}
@@ -120,7 +210,7 @@ for seed in range(args.seeds):
     if best is None or q > best[0] + 1e-12: best = (q, p, seed)
 Q, P, best_seed = best
 # order communities by size of candidate membership then size
-def comm_key(c): return (-len([n for n in c if n in cand_ids or nodes[n]['type'] == 'Slate']), -len(c))
+def comm_key(c): return (-len([n for n in c if nodes[n]['isTarget']]), -len(c), min(nodes[n]['name'] for n in c))
 P = sorted(P, key=comm_key)
 comm = {}
 for ci, c in enumerate(P):
@@ -211,16 +301,16 @@ summary = dict(
     cleanDir=os.path.abspath(C),
     cleanFiles={f: datetime.datetime.fromtimestamp(os.path.getmtime(os.path.join(C, f)), datetime.timezone.utc).isoformat(timespec='seconds')
                 for f in ['endorsements.csv', 'endorsers.csv', 'candidates.csv']},
-    nEdges=len(edges), nEndorsementEdges=len([e for e in edges if e['rel'] != 'Slate member']),
+    nEdges=len(edges), nEndorsementEdges=len([e for e in edges if e['kind'] == 'endorsement']), nMemberEdges=len([e for e in edges if e['kind'] == 'member']),
     nNodes=len(nodes), nEndorsers=n_end, nSingle=single,
     nCandidates=len([n for n in cand_names if n != SLATE]),
     nCore=core.number_of_nodes(), nCoreEdges=core.number_of_edges(),
     modularity=round(Q, 4), bestSeed=best_seed, seeds=args.seeds,
     nCommunitiesDistribution={str(k): v for k, v in sorted(n_comm_dist.items())},
-    relCounts=dict(collections.Counter(e['rel'] for e in edges)),
+    relCounts=dict(collections.Counter(e['rel'] for e in edges if e['kind'] == 'endorsement')),
     typeCounts=dict(collections.Counter(nodes[n]['type'] for n in nodes if not nodes[n]['isTarget'] or D.out_degree(n) > 0)),
-    sourceTypeCounts=dict(collections.Counter(st for e in edges for st in e['stype'])),
-    accessDates=sorted({e['date'] for e in edges}),
+    sourceTypeCounts=dict(collections.Counter(x['ty'] for e in edges for x in e['src'])),
+    accessDates=sorted({x['at'] for e in edges for x in e['src'] if x['at']} or {e['date'] for e in edges if e['date']}),
     nNeedsCheck=len([e for e in edges if e['check']]),
     # count only (never used as edges): pamphlet 'I refer to the following residents' lists
     nPamphletRefsExcluded=(len(rd('pamphlet_references.csv')) if os.path.exists(os.path.join(C, 'pamphlet_references.csv')) else None),
@@ -230,16 +320,26 @@ for r in RACE_ORDER:
     races.append(dict(race=r, candidates=[name2id[n] for n in cand_names if cand_info[n]['Race'] == r]))
 
 pair_together = {f'{a}|{b}': round(together(a, b), 3) for i, a in enumerate(targets_core) for b in targets_core[i+1:]}
-urls = sorted({u for e in edges for u in e['src']})
+urls = sorted({x['u'] for e in edges for x in e['src']})
 uix = {u: i for i, u in enumerate(urls)}
-for e in edges: e['src'] = [uix[u] for u in e['src']]
+for e in edges:
+    e['src'] = [{k: v for k, v in dict(u=uix[x['u']], ty=x['ty'], pg=x['pg'], snap=x['snap'], at=x['at']).items() if v != ''} for x in e['src']]
 out = dict(urls=urls, summary=summary, communities=comm_meta, races=races, nodes=list(nodes.values()), edges=edges,
            bridges=bridges, overlap=overlap, pairTogether=pair_together)
 with open(os.path.join(args.out, 'graph.json'), 'w', encoding='utf-8') as f:
     json.dump(out, f, ensure_ascii=False, separators=(',', ':'))
-for fn in ['endorsements.csv', 'endorsers.csv', 'candidates.csv', 'berkeley_endorsements_2026.xlsx', 'validation_report.md']:
-    p = os.path.join(C, fn)
-    if os.path.exists(p): shutil.copy2(p, os.path.join(args.out, fn))
+DOWNLOADS = [('berkeley_endorsements_2026.xlsx', 'Spreadsheet (XLSX, all tabs)'), ('endorsements.csv', 'endorsements.csv'),
+             ('endorsers.csv', 'endorsers.csv'), ('candidates.csv', 'candidates.csv'), ('slate_members.csv', 'slate_members.csv'),
+             ('edge_sources.csv', 'edge_sources.csv'), ('validation_report.md', 'Validation report')]
+copied = []
+for f in os.listdir(args.out):
+    if f != 'graph.json': os.remove(os.path.join(args.out, f))
+for fn, label in DOWNLOADS:
+    p_ = os.path.join(C, fn)
+    if os.path.exists(p_): shutil.copy2(p_, os.path.join(args.out, fn)); copied.append([fn, label])
+out['summary']['downloads'] = copied
+with open(os.path.join(args.out, 'graph.json'), 'w', encoding='utf-8') as f:
+    json.dump(out, f, ensure_ascii=False, separators=(',', ':'))
 
 # console report
 print(f"nodes={len(nodes)} edges={len(edges)} core={core.number_of_nodes()}/{core.number_of_edges()} Q={Q:.4f} seed={best_seed} k-dist={dict(n_comm_dist)}")

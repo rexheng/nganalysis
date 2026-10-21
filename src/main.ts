@@ -7,11 +7,11 @@ import { commColor, commName, LETTERS, esc, index, bridgeSentence, listJoin, coa
 import { srcLabel } from './methods';
 
 const TYPE_COLORS: Record<string, string> = {
-  'Candidate': '#1f1f1f', 'Slate': '#7B3294', 'Union': '#D55E00', 'Democratic club': '#0072B2',
+  'Candidate': '#1f1f1f', 'Candidate (withdrawn)': '#6f6f6f', 'Slate': '#7B3294', 'Union': '#D55E00', 'Democratic club': '#0072B2',
   'Political/advocacy org': '#009E73', 'Current elected official': '#E69F00', 'Former elected official': '#CC79A7', 'Individual': '#9C9C9C',
 };
 const TYPE_ORDER = Object.keys(TYPE_COLORS);
-const DIM = '#ececec', FADE = '#d4d4d4';
+const DIM = '#ececec', FADE = '#d4d4d4', MEMBER = 'rgba(123,50,148,0.75)';
 type View = 'coalitions' | 'bridges' | 'race';
 const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector(s) as T;
 const fmtDate = (iso: string) => new Date(iso + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
@@ -23,7 +23,9 @@ async function main() {
   const ix = index(d);
   const { byId } = ix;
   const edgesOut = new Map<string, GEdge[]>(); const edgesIn = new Map<string, GEdge[]>();
+  const memberEdges = d.edges.filter((e) => e.kind === 'member');
   for (const e of d.edges) {
+    if (e.kind === 'member') continue;
     (edgesOut.get(e.s) || edgesOut.set(e.s, []).get(e.s)!).push(e);
     (edgesIn.get(e.t) || edgesIn.set(e.t, []).get(e.t)!).push(e);
   }
@@ -31,8 +33,10 @@ async function main() {
   const targetBridges = d.bridges.filter((b) => byId.get(b.id)!.isTarget);
   const TOPN = 10;
   const topBridgeSet = new Set(endorserBridges.slice(0, TOPN).map((b) => b.id));
-  const bridgeRank = new Map(endorserBridges.map((b, i) => [b.id, i + 1]));
-  const targetRank = new Map(targetBridges.map((b, i) => [b.id, i + 1]));
+  // competition ranking: ties share a rank
+  const rankMap = (bs: typeof endorserBridges) => new Map(bs.map((b) => [b.id, 1 + bs.filter((x) => x.bc > b.bc + 1e-9).length]));
+  const bridgeRank = rankMap(endorserBridges);
+  const targetRank = rankMap(targetBridges);
 
   const state = { view: 'coalitions' as View, selected: null as string | null, hovered: null as string | null,
     showAll: false, colorBy: 'community' as 'community' | 'type', race: d.races[1]?.race || d.races[0].race, bridgeCands: false };
@@ -41,7 +45,7 @@ async function main() {
   const g = new Graph({ type: 'directed', multi: false });
   const baseSize = (n: GNode) => (n.isTarget ? 5 + 1.55 * Math.sqrt(Math.max(n.inDeg, 1)) : 2.2 + 1.5 * Math.sqrt(n.outDeg));
   for (const n of d.nodes) g.addNode(n.id, { x: n.x, y: n.y, size: baseSize(n), label: n.name, color: commColor(n.community) });
-  for (const e of d.edges) if (!g.hasEdge(e.s, e.t)) g.addDirectedEdgeWithKey(e.id, e.s, e.t, { size: 0.6 });
+  for (const e of d.edges) if (!g.hasEdge(e.s, e.t)) g.addDirectedEdgeWithKey(e.id, e.s, e.t, { size: 0.6, kind: e.kind });
 
   const raceSet = () => new Set(d.races.find((r) => r.race === state.race)?.candidates || []);
   const neighbors = (id: string) => new Set([id, ...g.neighbors(id)]);
@@ -57,7 +61,7 @@ async function main() {
     }
     if (state.view === 'race') {
       const s = new Set<string>();
-      for (const c of raceSet()) { s.add(c); for (const m of g.inNeighbors(c)) s.add(m); }
+      for (const c of raceSet()) { s.add(c); for (const m of g.inNeighbors(c)) s.add(m); for (const m of g.outNeighbors(c)) if (memberEdges.some((e) => e.s === c && e.t === m)) s.add(m); }
       return s;
     }
     return null;
@@ -69,7 +73,7 @@ async function main() {
     RACE_SHARED = new Set();
     if (state.view === 'race') {
       const cnt = new Map<string, number>();
-      for (const c of raceSet()) for (const m of g.inNeighbors(c)) cnt.set(m, (cnt.get(m) || 0) + 1);
+      for (const c of raceSet()) for (const e of edgesIn.get(c) || []) cnt.set(e.s, (cnt.get(e.s) || 0) + 1);
       for (const [m, k] of cnt) if (k >= 2) RACE_SHARED.add(m);
     }
   }
@@ -104,9 +108,14 @@ async function main() {
       const s = g.source(eid), t = g.target(eid); const r: any = { ...attr };
       const sn = byId.get(s)!;
       const active = state.hovered || state.selected;
+      const isMember = attr.kind === 'member';
       if (active) {
-        if (s === active || t === active) { r.color = '#3a3a3a'; r.size = 1.1; r.zIndex = 2; } else r.hidden = true;
+        if (s === active || t === active) { r.color = isMember ? MEMBER : '#3a3a3a'; r.size = isMember ? 2 : 1.1; r.zIndex = 2; } else r.hidden = true;
         return r;
+      }
+      if (isMember) {
+        const vis = state.view !== 'race' || raceSet().has(t) || raceSet().has(s);
+        r.color = vis ? MEMBER : '#efefef'; r.size = vis ? 1.8 : 0.6; r.zIndex = 3; return r;
       }
       if (sn.leaf && !state.showAll) { r.hidden = state.view !== 'race' || !FOCUS?.has(s); if (!r.hidden) r.color = '#e2e2e2'; return r; }
       if (state.view === 'bridges') {
@@ -188,13 +197,20 @@ async function main() {
   const typeDot = (t: string) => `<span class="tdot" style="--c:${TYPE_COLORS[t] || '#999'}"></span>`;
 
   function sourcesHtml(e: GEdge) {
-    const links = e.src.map((i) => `<a href="${esc(d.urls[i])}" target="_blank" rel="noopener">${esc(srcLabel(d.urls[i]))}<span aria-hidden="true"> ↗</span></a>`).join('');
-    return `<span class="srcs">${links}<span class="acc">accessed ${esc(fmtDate(e.date))}</span></span>`;
+    const dates = new Set(e.src.map((x) => x.at || e.date).filter(Boolean));
+    const links = e.src.map((x) => {
+      const u = d.urls[x.u]; const pg = x.pg ? `, p. ${esc(x.pg)}` : '';
+      const href = x.pg && /\.pdf$/i.test(u) ? `${u}#page=${encodeURIComponent(x.pg)}` : u;
+      const acc = dates.size > 1 && x.at ? ` <span class="acc">(${esc(fmtDate(x.at))})</span>` : '';
+      return `<a href="${esc(href)}" target="_blank" rel="noopener" title="${esc(x.ty || '')}">${esc(srcLabel(u))}${pg}<span aria-hidden="true"> ↗</span></a>${acc}`;
+    }).join('');
+    const one = dates.size === 1 ? `<span class="acc">accessed ${esc(fmtDate([...dates][0]))}</span>` : '';
+    return `<span class="srcs">${links}${one}</span>`;
   }
   function edgeRow(e: GEdge, otherId: string, showTitle: boolean) {
     const o = byId.get(otherId)!;
     const badges: string[] = [];
-    if (e.rel !== 'Endorses') badges.push(`<span class="badge">${esc(e.rel)}</span>`);
+    if (e.rel !== 'Endorses' && e.kind !== 'member') badges.push(`<span class="badge">${esc(e.rel)}</span>`);
     const title = showTitle && e.title ? `<span class="ttl">${esc(e.title)}</span>` : '';
     const asw = e.asw && !e.asw.split(' | ').every((a) => a === o.name) && showTitle ? `<span class="asw">as written: ${esc(e.asw)}</span>` : '';
     const chk = e.check ? `<span class="flag" title="Reviewer note">⚑ ${esc(e.check)}</span>` : '';
@@ -225,12 +241,15 @@ async function main() {
     let html = `<button class="back" data-back>← Back to ${state.view === 'race' ? 'race view' : state.view}</button>
       <div class="ncard"><p class="ntype">${typeDot(n.type)}${esc(n.type)}${n.race ? ` · ${esc(n.race)}` : ''}</p>
       <h3>${esc(n.name)}</h3>
-      ${n.typeNote ? `<p class="muted small">${esc(n.typeNote)}</p>` : ''}
+      ${n.typeNote ? `<p class="muted small">${esc(n.typeNote)}</p>` : ''}${n.status ? `<p class="muted small">Status: ${esc(n.status)}</p>` : ''}
       ${titles.length ? `<p class="ttl-main">${titles.slice(0, 2).map(esc).join(' · ')}</p>` : ''}
       <p class="meta">${chip(n.community)} Placed in <strong>${esc(commName(n.community))}</strong>${comms > 1 ? ` · connected to ${numWord(comms)} coalitions` : ''}</p>
       ${n.campaignUrl ? `<p class="meta"><a href="${esc(n.campaignUrl)}" target="_blank" rel="noopener">Campaign site ↗</a>${n.endorsementsPage && n.endorsementsPage !== n.campaignUrl ? ` · <a href="${esc(n.endorsementsPage)}" target="_blank" rel="noopener">Endorsements page ↗</a>` : ''}</p>` : ''}
       ${bLine}${sentence}</div>`;
-    if (n.name === SLATE) html += `<p class="small">Slate members: ${ix.slateMembers.map((m) => nlink(m)).join(', ')}.</p>`;
+    const mem = memberEdges.filter((e) => e.t === id);
+    if (mem.length) html += `<h4>Members <span class="cnt">${mem.length}</span></h4><ul class="elist">${mem.map((e) => edgeRow(e, e.s, false)).join('')}</ul>`;
+    const memOf = memberEdges.filter((e) => e.s === id);
+    if (memOf.length) html += `<h4>Member of</h4><ul class="elist">${memOf.map((e) => edgeRow(e, e.t, false)).join('')}</ul>`;
     if (outs.length) html += `<h4>Endorses <span class="cnt">${outs.length}</span></h4><ul class="elist">${outs.map((e) => edgeRow(e, e.t, false)).join('')}</ul>`;
     if (ins.length) html += `<h4>Endorsed by <span class="cnt">${ins.length}</span></h4>${groupedIn(id)}`;
     if (n.isTarget && !ins.length) html += `<p class="muted">No endorsements recorded for this candidate. See the methodology notes below.</p>`;
@@ -251,11 +270,14 @@ async function main() {
   }
 
   function bridgesPanel() {
-    const list = (state.bridgeCands ? targetBridges : endorserBridges).slice(0, 15);
+    const list = (state.bridgeCands ? targetBridges : endorserBridges)
+      .filter((b, i, arr) => i < 15 || (state.bridgeCands ? targetRank : bridgeRank).get(b.id) === (state.bridgeCands ? targetRank : bridgeRank).get(arr[14].id));
     const max = list[0]?.bc || 1;
-    const rows = list.map((b, i) => {
-      const n = byId.get(b.id)!;
-      return `<li><div class="br-h"><span class="rank">${i + 1}</span>${nlink(b.id, 'strong')}<span class="muted small">${esc(n.type)}</span></div>
+    const rmap = state.bridgeCands ? targetRank : bridgeRank;
+    const rows = list.map((b) => {
+      const n = byId.get(b.id)!; const rk = rmap.get(b.id)!;
+      const tie = list.filter((x) => rmap.get(x.id) === rk).length > 1;
+      return `<li><div class="br-h"><span class="rank">${tie ? '=' : ''}${rk}</span>${nlink(b.id, 'strong')}<span class="muted small">${esc(n.type)}</span></div>
       <div class="br-bar"><span style="width:${(100 * b.bc) / max}%;background:${commColor(n.community)}"></span><em>${b.bc.toFixed(4)}</em></div>
       <p class="sentence small">${bridgeSentence(d, b.id)}</p></li>`;
     }).join('');
@@ -302,8 +324,8 @@ async function main() {
     const L = $('#legend');
     const items = state.colorBy === 'community'
       ? d.communities.map((c) => `<li>${chip(c.id)}<span>${esc(commName(c.id))}</span></li>`).join('')
-      : TYPE_ORDER.map((t) => `<li>${typeDot(t)}<span>${esc(t)}</span></li>`).join('');
-    L.innerHTML = `<ul>${items}</ul><p>Dot size: endorsements given or received${state.showAll ? '' : ' · <span class="tdot" style="--c:' + FADE + '"></span>grey = backs one candidate'}</p>`;
+      : TYPE_ORDER.filter((t) => d.nodes.some((n) => n.type === t)).map((t) => `<li>${typeDot(t)}<span>${esc(t)}</span></li>`).join('');
+    L.innerHTML = `<ul>${items}</ul><p>${memberEdges.length ? '<span class="mline"></span>slate membership (not an endorsement) · ' : ''}Dot size: endorsements given or received${state.showAll ? '' : ' · <span class="tdot" style="--c:' + FADE + '"></span>grey = backs one candidate'}</p>`;
   }
 
   // ---------- interactions ----------

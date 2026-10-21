@@ -40,10 +40,15 @@ with sync_playwright() as p:
         pg.screenshot(path=f'{OUT}/{name}-node-click.png')
         if name == 'mobile': pg.locator('#panel').screenshot(path=f'{OUT}/{name}-node-click-panel.png')
         # search
+        pg.mouse.move(2, 2) if name == 'desktop' else None
         pg.fill('#q', 'Karen W'); pg.wait_for_timeout(200); pg.keyboard.press('Enter'); pg.wait_for_timeout(900)
         report['checks'][f'{name}-search'] = pg.locator('#panel h3').first.inner_text()
         pg.evaluate("document.getElementById('explore').scrollIntoView()"); pg.wait_for_timeout(300)
         pg.screenshot(path=f'{OUT}/{name}-search-select.png')
+        pg.fill('#q', 'Right to Housing'); pg.wait_for_timeout(200); pg.keyboard.press('Enter'); pg.wait_for_timeout(900)
+        report['checks'][f'{name}-slate'] = pg.locator('#panel h3').first.inner_text()
+        pg.evaluate("document.getElementById('explore').scrollIntoView()"); pg.wait_for_timeout(300)
+        pg.screenshot(path=f'{OUT}/{name}-slate-select.png')
         # show all toggle
         pg.keyboard.press('Escape'); pg.check('#showall'); pg.wait_for_timeout(400)
         pg.screenshot(path=f'{OUT}/{name}-showall.png'); pg.uncheck('#showall')

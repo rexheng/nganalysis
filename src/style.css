@@ -80,7 +80,7 @@ h1{font-family:var(--serif);font-weight:700;font-size:clamp(32px,5.2vw,50px);lin
 .tbar-l{margin:4px 0 0}
 .bridges li{padding:9px 0;border-top:1px solid var(--rule)}
 .br-h{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
-.rank{font:800 13px var(--sans);width:18px;color:var(--muted)}
+.rank{font:800 13px var(--sans);min-width:22px;color:var(--muted)}
 .br-bar{display:flex;align-items:center;gap:6px;margin:4px 0 2px 26px}
 .br-bar span{height:6px;border-radius:3px;min-width:2px}
 .br-bar em{font-style:normal;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
@@ -154,3 +154,4 @@ h1{font-family:var(--serif);font-weight:700;font-size:clamp(32px,5.2vw,50px);lin
   .ov-grid{grid-template-columns:130px repeat(var(--n),26px);min-width:calc(130px + var(--n) * 26px)}
 }
 @media (prefers-reduced-motion: reduce){*{scroll-behavior:auto!important}}
+.mline{display:inline-block;width:18px;height:0;border-top:2px solid rgba(123,50,148,.8);vertical-align:3px;margin-right:5px}
