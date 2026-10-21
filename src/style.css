@@ -309,7 +309,8 @@ body.app{display:flex;flex-direction:column;height:100dvh;overflow:hidden;font-f
 .srow .sname{text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .srow .sbar{position:relative;height:12px;background:#f0f0f0}
 .srow .sbar i{position:absolute;left:0;top:0;bottom:0;background:#555}
-.srow .sbar b{position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;background:#d1452f}
+.srow .sbar b{position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;background:#e27d6a;z-index:0}
+.srow .sbar i{z-index:1}.srow .sbar .snum{z-index:2;background:#fff;padding:0 2px;margin-left:4px}
 .srow .snum{position:absolute;top:50%;transform:translateY(-50%);margin-left:6px;font-variant-numeric:tabular-nums;line-height:1}
 .srow .sbar{margin-right:2.2em}
 .srow.hl .sbar i{background:#111}.srow.hl .sname,.srow.hl .snum{font-weight:700}
@@ -329,7 +330,7 @@ body.app{display:flex;flex-direction:column;height:100dvh;overflow:hidden;font-f
   .sheet.peek:not(.open) .tabs{display:flex}
   .sheet.peek:not(.open) .panel{display:block}
   .zoom{bottom:calc(var(--peek,52px) + 10px)}
-  .sheet-open .zoom{display:none}
+  .sheet-open .zoom,.sheet-open #legendbox{display:none}
   body.app:not(.sheet-ready) .sheet,body.app:not(.sheet-ready) .zoom{visibility:hidden}
 }
 @media (max-width:640px){ .zoom{flex-direction:row} }

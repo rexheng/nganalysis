@@ -16,7 +16,7 @@ function renderHeatmap(d: Data, conf = false) {
   const order = [...d.communities.flatMap((c) => c.targets), ...d.loose.map((l) => l.id)];
   const ids = order.filter((id, i) => order.indexOf(id) === i);
   const N = (id: string) => ix.byId.get(id)!;
-  const lab = (id: string) => { const n = N(id); return n.type === 'Slate' ? 'Slate page' : surname(n); };
+  const lab = (id: string) => { const n = N(id); return n.type === 'Slate' ? 'Slate' : surname(n); };
   let h = `<table class="hm"><caption class="sr">Share of ${d.summary.nRuns.toLocaleString("en-US")} clustering runs in which each pair of candidates is grouped together, ${conf ? 'without the probable endorsements' : 'with all endorsements'}</caption><thead><tr><td></td>${ids.map((id) => `<th scope="col"><span>${chip(N(id).community)} ${esc(lab(id))}</span></th>`).join('')}</tr></thead><tbody>`;
   for (const a of ids) {
     h += `<tr><th scope="row">${chip(N(a).community)} ${esc(lab(a))}${N(a).memberOf ? '<sup aria-label="slate member">s</sup>' : ''} <small>${esc(raceShort(N(a).race))}</small></th>`;

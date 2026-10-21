@@ -227,7 +227,7 @@ export function buildTexts(d: Data): Texts {
       // the candidate whose list is shortest yet most drawn from the slate's
       const rows = top3.map((r, i) => ({ r, c: base[i]! }));
       const g = rows.slice().sort((x, y) => x.c.nList - y.c.nList)[0];
-      if (g && g.r.k * 2 > g.c.nList && rows.every((x) => x === g || x.c.nList > g.c.nList)) p += ` ${esc(surname(g.r.n))}’s list is short: ${g.r.k} of ${esc(surname(g.r.n))}’s ${g.c.nList} backers also back the slate.`;
+      if (g && g.r.k * 2 > g.c.nList && rows.every((x) => x === g || x.c.nList > g.c.nList)) p += ` ${esc(surname(g.r.n))} has only ${g.c.nList} backers, but ${g.r.k} of them also back the slate.`;
     }
     findings.push(p);
     // headline graphic: of the slate's backers, how many back each council candidate; tick = base rate
@@ -235,7 +235,7 @@ export function buildTexts(d: Data): Texts {
       const rowsC = so.council.slice().sort((x, y) => y.n - x.n || N(x.t).name.localeCompare(N(y.t).name));
       const hl = new Set(top3.filter((r) => headline.includes(r.n.name)).map((r) => r.n.id));   // bars for the candidates the headline names
       const W = (v: number) => `${((100 * v) / sh.nS).toFixed(2)}%`;
-      strip = `<figure class="strip" aria-labelledby="strip-cap"><div class="strip-rows" role="img" aria-label="${esc(rowsC.map((c) => `${N(c.t).name}: ${c.n} of ${sh.nS}; other endorsers ${pct(c.base ?? 0)}`).join('. '))}">${rowsC.map((c) => `<div class="srow${hl.has(c.t) ? ' hl' : ''}" aria-hidden="true"><span class="sname">${esc(surname(N(c.t)))}</span><span class="sbar"><i style="width:${W(c.n)}"></i>${c.base !== undefined ? `<b style="left:${W(c.base * sh.nS)}"></b>` : ''}<span class="snum" style="left:${W(Math.max(c.n, (c.base ?? 0) * sh.nS))}">${c.n}</span></span></div>`).join('')}</div><figcaption id="strip-cap">Bars: how many of the slate’s ${sh.nS} backers also back each council candidate. Ticks: the share of other multi-candidate endorsers who do.</figcaption></figure>`;
+      strip = `<figure class="strip" aria-labelledby="strip-cap"><div class="strip-rows" role="img" aria-label="${esc(rowsC.map((c) => `${N(c.t).name}: ${c.n} of ${sh.nS}; other endorsers ${pct(c.base ?? 0)}`).join('. '))}">${rowsC.map((c) => `<div class="srow${hl.has(c.t) ? ' hl' : ''}" aria-hidden="true"><span class="sname">${esc(surname(N(c.t)))}</span><span class="sbar"><i style="width:${W(c.n)}"></i>${c.base !== undefined ? `<b style="left:${W(c.base * sh.nS)}"></b>` : ''}<span class="snum" style="left:${W(c.n)}">${c.n}</span></span></div>`).join('')}</div><figcaption id="strip-cap">Bars: how many of the slate’s ${sh.nS} backers also back each council candidate. Ticks: the share of other multi-candidate endorsers who do.</figcaption></figure>`;
     }
   }
 
@@ -256,7 +256,7 @@ export function buildTexts(d: Data): Texts {
       const backs = [...new Set(mem.flatMap((mm) => ix.inn.get(mm.id) || []))].map(N).sort((x, y) => x.name.localeCompare(y.name));
       const wa = N(c.weakest.a), wb = N(c.weakest.b);
       const drop = npm && c.weakest.pPooled - c.weakest.pConf >= 0.05;
-      m += ` Only ${listJoin(backs.map((n, i) => `${i === 0 && !/^(Individual|Current elected official|Former elected official|Candidate)/.test(n.type) ? 'the ' : ''}${nlink(n)}`))} endorse${backs.length === 1 ? 's' : ''} members individually${npm ? `, and ${numWord(npm)} of those ${numWord(nIn)} endorsements are the probable ones` : ''}.${drop ? ` Without them, ${esc(surname(wa))} and ${esc(surname(wb))} land together in ${pctCut(c.weakest.pConf, T + (S.border ?? 0.05))} of runs instead of ${pctCut(c.weakest.pPooled, T + (S.border ?? 0.05))}, the weakest pair in ${LETTERS[memberBloc]}.` : ''}`;
+      m += ` Only ${listJoin(backs.map((n, i) => `${i === 0 && !/^(Individual|Current elected official|Former elected official|Candidate)/.test(n.type) ? 'the ' : ''}${nlink(n)}`))} endorse${backs.length === 1 ? 's' : ''} members individually${npm ? `, and ${numWord(npm)} of those ${numWord(nIn)} endorsements are the probable ones` : ''}.${drop ? ` Without them, ${esc(surname(wa))} and ${esc(surname(wb))} land together in ${pctCut(c.weakest.pConf, T + (S.border ?? 0.05))} of runs instead of ${pctCut(c.weakest.pPooled, T + (S.border ?? 0.05))}, which makes them ${LETTERS[memberBloc]}’s weakest pair.` : ''}`;
     }
     findings.push(m);
   }
