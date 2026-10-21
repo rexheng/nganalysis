@@ -271,7 +271,7 @@ body.app{display:flex;flex-direction:column;height:100dvh;overflow:hidden;font-f
   .appbar{padding:6px 10px;gap:6px}
   .appbar>.ab-row:first-child{width:100%}
   .apptitle{font-size:15px}
-  .apptitle .kick{font-size:11px;letter-spacing:.04em}
+  .apptitle .kick{font-size:12px;letter-spacing:.03em}
   .hide-n{display:none}
   .ab-tools{width:100%;flex-wrap:nowrap}
   .ab-tools .search{flex:1 1 auto;max-width:none}
@@ -301,3 +301,16 @@ body.app{display:flex;flex-direction:column;height:100dvh;overflow:hidden;font-f
 .downloads{list-style:none;padding:0}
 .svg-narrow svg{max-width:480px;margin:0 auto}
 #graph .preview{position:absolute;inset:0;pointer-events:none}
+.nw{white-space:nowrap}
+/* headline strip: slate backers per council candidate, tick = base rate */
+.strip{margin:.4rem 0 1.1rem;max-width:520px}
+.strip-rows{display:grid;gap:3px}
+.srow{display:grid;grid-template-columns:7.5em 1fr 2em;align-items:center;gap:.5em;font-size:13px;line-height:1.25}
+.srow .sname{text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.srow .sbar{position:relative;height:12px;background:#f0f0f0}
+.srow .sbar i{position:absolute;left:0;top:0;bottom:0;background:#555}
+.srow .sbar b{position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;background:#d1452f}
+.srow .snum{font-variant-numeric:tabular-nums}
+.strip figcaption{font-size:13px;color:#555;margin-top:.35rem}
+.legend .lbr{list-style:none;margin:.4rem 0 0;padding:0;display:grid;gap:2px;font-size:13px}
+.legend .lbr .ringn{display:inline-grid;place-items:center;width:18px;height:18px;border:2px solid #111;border-radius:50%;font-size:12px;font-weight:700;line-height:1}

@@ -67,7 +67,7 @@ function renderOverlap(d: Data) {
     el.querySelector('.ovwrap')!.innerHTML = h;
     const w = el.querySelector<HTMLElement>('.ovwrap')!; w.tabIndex = 0; w.setAttribute('role', 'region'); w.setAttribute('aria-label', 'Endorser overlap table; scroll sideways to see every column');
   };
-  el.innerHTML = `<div id="ovtip" class="ovtip" role="status" hidden></div><div class="seg" role="group" aria-label="Overlap measure"><button data-m="n" aria-pressed="true">Shared endorsers</button><button data-m="oc" aria-pressed="false">% of the smaller list</button></div><div class="ovwrap"></div>`;
+  el.innerHTML = `<div id="ovtip" class="ovtip" role="status" hidden></div><div class="seg" role="group" aria-label="Overlap measure"><button data-m="n" aria-pressed="true">Count</button><button data-m="oc" aria-pressed="false">% of smaller list</button></div><div class="ovwrap"></div>`;
   draw();
   const tip = document.getElementById('ovtip')!;
   let cur: HTMLElement | null = null;

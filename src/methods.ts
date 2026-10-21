@@ -1,5 +1,5 @@
 import type { Data } from './types';
-import { esc, index, numWord, blocName, pct, pctCut, srcLabel, LETTERS, plural, surname, listJoin, marginLabel, weakPct, slateShares, nearMisses } from './text';
+import { esc, index, numWord, blocName, pct, pctCut, srcLabel, LETTERS, plural, surname, listJoin, marginLabel, weakPct, slateShares, nearMisses, intactRange } from './text';
 export { srcLabel } from './text';
 
 const nProbOf = (d: Data) => d.edges.filter((e) => e.kind === 'endorsement' && /probable/i.test(e.conf || '')).length;
@@ -7,6 +7,12 @@ const prettyDate = (iso: string) => new Date(iso + 'T12:00:00Z').toLocaleDateStr
 const builtPT = (d: Data) => new Date(d.summary.generated).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', dateStyle: 'long', timeStyle: 'short' });
 
 /** the short methods block on the findings page: just enough to trust and reproduce the result */
+/** the source note on a probable edge, in plain sentences (same facts, reordered) */
+function probNote(n: string, many: boolean) {
+  const m = n.match(/^Name appears on an unlabelled line directly below (.+?)'s (.+?) entry; aggregators that cite the \1 page read it as \2; not confirmed with \1\.?$/);
+  if (m) return `On ${m[1]}’s page ${many ? 'each name sits' : 'the name sits'} on an unlabelled line just below its ${m[2]} entry. Aggregators read ${many ? 'them' : 'it'} as ${m[2]} ${many ? 'endorsements' : 'an endorsement'}; ${m[1]} has not confirmed.`;
+  return (many ? n.replace(/^Name appears/, 'Each name appears') : n).replace(/'/g, '’');
+}
 export function methodsHtml(d: Data): string {
   const ix = index(d); const S = d.summary; const T = S.robustThreshold; const B = S.bootstrap; const nProb = nProbOf(d);
   const vig = d.urls.find((u) => u.includes('acvote')) || '';
@@ -27,8 +33,8 @@ export function methodsHtml(d: Data): string {
 <h2 id="methods">Methods</h2>
 <ul class="mlist">
 <li><strong>Endorsement:</strong> a name on a candidate’s endorsement page, on an organization’s own list or in a candidate statement in the <a href="${esc(vig)}" rel="noopener" target="_blank">county voter guide</a>, as of ${esc(prettyDate(S.accessDates[0]))}. Where an organization publishes its own list, that list is the source. Excluded: the guide’s “I refer to the following residents” lists${S.nUnverifiedLeads ? ` and ${S.nUnverifiedLeads} claims found only on aggregator sites` : ''}.</li>
-${nProb ? `<li><strong>Probable:</strong> ${probWho}. ${notes.length === 1 ? esc((probE.length > 1 ? notes[0].replace(/^Name appears/, 'Each name appears') : notes[0]).replace(/'/g, '’')) : ''} Every result is also computed without them; both graphics draw them in blue.</li>` : ''}
-<li><strong>Coalitions:</strong> Louvain clustering, which groups nodes that link more among themselves than to the rest, run ${S.nRuns.toLocaleString('en-US')} times on shuffled input. Endorsers of a single candidate are left out. Groups are built by complete linkage, which merges two groups only if every cross pair clears ${pct(T)}.${S.poolsMinAgree ? ` Each half of the runs gives the same groups.` : ''} The slate is one node, tied to its members by slate links.</li>
+${nProb ? `<li><strong>Probable:</strong> ${probWho}. ${notes.length === 1 ? esc(probNote(notes[0], probE.length > 1)) : ''} Every result is also computed without them; both graphics draw them in blue.</li>` : ''}
+<li><strong>Coalitions:</strong> Louvain clustering (networkx), run ${S.nRuns.toLocaleString('en-US')} times on shuffled input; endorsers of a single candidate are left out.${S.poolsMinAgree ? ` Either half of the runs gives the same groups.` : ''}${ix.slate ? ` The slate counts as one participant, linked to its ${numWord(ix.slateMembers.length)} members.` : ''}</li>
 <li><strong>Spanning:</strong> the number of coalitions in which an endorser backs a candidate; ties share a rank. Tested by ${B.resamples} reruns that each drop a random ${pct(B.dropShare)} of endorsements, by dropping each endorsement in turn, and without the probable ones.</li>
 <li><strong>Caveat:</strong> campaign pages are self-reported and range from zero to ${Math.max(...d.nodes.filter((n) => n.isTarget).map((n) => n.inDeg))} names, so long lists look more central. An endorsement is a public signal, not money or votes.</li>
 </ul>
@@ -65,7 +71,7 @@ Generated ${builtPT(d)} Pacific time from the cleaned dataset. Every number belo
 - The ${S.nEndorsementEdges} endorsements cite these source types: ${cites.join(', ')}. Aggregator pages only corroborate; they never create an endorsement on their own.
 - Excluded: the voter guide’s “I refer to the following residents” lists (${S.nPamphletRefsExcluded ?? 'n/a'} references to ${S.nPamphletPeople ?? 'n/a'} people)${S.nUnverifiedLeads ? `; ${S.nUnverifiedLeads} unconfirmed aggregator or third-party claims (unverified_leads.csv)` : ''}; testimonials not in an endorsement list; website navigation text.
 - Names were standardized. Actor types: ${typeList.join(', ')}. The printed title decides current versus former official.${rc.length ? ` Ranked-choice preferences printed by sources (${rc.join(', ')}) are kept as attributes; every endorsement counts equally.` : ''}
-${nProb ? `- ${nProb} endorsements are rated probable: ${d.edges.filter((e) => /probable/i.test(e.conf || '')).map((e) => `${nm(e.s)} → ${nm(e.t)}`).join('; ')}.\n` : ''}- The ${ix.slate?.name ?? 'slate'} is one node; its ${ix.slateMembers.length} members${nominators.length ? ` and ${nominators.join(', ')} (which nominated the slate)` : ''} are tied to it by slate links, which count for clustering but are not endorsements.
+${nProb ? `- ${nProb} endorsements are rated probable: ${d.edges.filter((e) => /probable/i.test(e.conf || '')).map((e) => `${nm(e.s)} → ${nm(e.t)}`).join('; ')}.\n` : ''}- The ${ix.slate?.name ?? 'slate'} counts as one participant; its ${ix.slateMembers.length} members${nominators.length ? ` and ${nominators.join(', ')} (which nominated the slate)` : ''} are tied to it by slate links, which count for clustering but are not endorsements.
 ${wd.length ? `- ${wd.map((n) => n.name).join(', ')} withdrew and ${wd.length > 1 ? 'are' : 'is'} analysed only as ${wd.length > 1 ? 'endorsers' : 'an endorser'}.\n` : ''}
 ## Coalitions
 
@@ -82,7 +88,7 @@ Coalitions: ${d.communities.map((c) => `${LETTERS[c.id]} = ${blocName(ix, c)} (w
 
 Near-misses: ${nearMisses(d).map((x) => `${nm(x.l.id)} with ${LETTERS[x.c]} (weakest pair ${pctCut(x.l.nearMin!, T)} with all endorsements, ${pctCut(x.l.nearMinConf!, T)} without probable)`).join('; ') || 'none'}.${S.minRefused ? ` First merge refused under the rule: ${S.minRefused.set.join(' + ')} at ${(S.minRefused.v * 100).toFixed(2)}%.` : ''}
 
-Fragility: ${B.resamples} reruns, each dropping a random ${pct(B.dropShare)} of endorsements (probable ones included in the draw) and redoing ${B.runsPerResample} shuffled Louvain runs with and ${B.runsPerResample} without the probable endorsements, then the same rule as step 4 (complete linkage at ${pct(T)} on the pairwise minimum). Number of coalitions found: ${Object.entries(S.bootGroups).map(([k, v]) => `${k}: ${v}`).join(', ')}. Each coalition survived intact (same candidates, nobody added) in: ${(S.bootFate || []).map((f, i) => `${LETTERS[i]} ${f.intact || 0}`).join(', ')} of ${B.resamples}; all ${d.communities.length} intact together in ${S.bootIntactAll ?? 'n/a'}.
+Fragility: ${B.resamples} reruns, each dropping a random ${pct(B.dropShare)} of endorsements (probable ones included in the draw) and redoing ${B.runsPerResample} shuffled Louvain runs with and ${B.runsPerResample} without the probable endorsements, then the same rule as step 4 (complete linkage at ${pct(T)} on the pairwise minimum). Number of coalitions found: ${Object.entries(S.bootGroups).map(([k, v]) => `${k}: ${v}`).join(', ')}. Each coalition survived intact (same candidates, nobody added) in: ${d.communities.map((c) => `${LETTERS[c.id]} ${c.intact ?? 0} (95% Wilson range ${intactRange(c)})`).join(', ')} of ${B.resamples}; all ${d.communities.length} intact together in ${S.bootIntactAll ?? 'n/a'}.
 
 ## Endorsers who span coalitions
 
@@ -92,7 +98,7 @@ Fragility: ${B.resamples} reruns, each dropping a random ${pct(B.dropShare)} of 
 
 ## Overlap
 
-The findings page and the overlap matrix use raw counts of shared endorsers. graph.json also gives Jaccard similarity (shared endorsers ÷ endorsers of either candidate).${d.slateOverlap ? ` By Jaccard, the council candidate closest to the slate is ${nm(d.slateOverlap.council[0].t)} (${d.slateOverlap.council[0].j}); it stays first in ${pct(d.slateOverlap.top1Share)} of ${d.slateOverlap.resamples.toLocaleString('en-US')} bootstrap resamples of all endorsers (drawn with replacement, every list recomputed).` : ''}
+The findings page and the overlap matrix use raw counts of shared endorsers. graph.json also gives Jaccard similarity (shared endorsers ÷ endorsers of either candidate).${d.slateOverlap ? ` By Jaccard, the council candidate closest to the slate is ${nm(d.slateOverlap.council[0].t)} (${d.slateOverlap.council[0].j}); it stays first in ${pct(d.slateOverlap.top1Share)} of ${d.slateOverlap.resamples.toLocaleString('en-US')} bootstrap resamples of all endorsers (drawn with replacement, every list recomputed).` : ''}${d.slateOverlap?.nOthersMulti ? `\n\nBase rate: of the ${d.slateOverlap.nOthersMulti} endorsers who back two or more candidates but not the slate, the share backing each council candidate: ${d.slateOverlap.council.map((c) => `${nm(c.t)} ${pct(c.base ?? 0)}`).join(', ')}.` : ''}${d.slateOverlap?.leadBoot ? ` Resampling the slate's own backers ${d.slateOverlap.leadBoot.resamples.toLocaleString('en-US')} times (with replacement): ${nm(d.slateOverlap.leadBoot.a)} has more of them than ${nm(d.slateOverlap.leadBoot.b)} in ${pct(d.slateOverlap.leadBoot.aLeads)}, ties in ${pct(d.slateOverlap.leadBoot.tie)}; ${nm(d.slateOverlap.leadBoot.a)} has a majority in ${pct(d.slateOverlap.leadBoot.aMajority)}, ${nm(d.slateOverlap.leadBoot.b)} in ${pct(d.slateOverlap.leadBoot.bMajority)}.` : ''}
 
 ## Colour
 

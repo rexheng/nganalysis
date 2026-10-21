@@ -143,25 +143,25 @@ def render(d, W, fs, narrow):
     for n in tg:   # every candidate is labelled (forced placement); a withdrawn one is marked as such
         x, y = P[n['id']]
         lbl = short_name(n) + (' (withdrew)' if n.get('analysisEndorser') else '')
-        p = place(lbl, x, y, rad(n), fs * 0.92, False, True)
+        p = place(lbl, x, y, rad(n), fs, False, True)
         if p: labels.append((p, lbl, False))
     tl = list(leaders)
     for p, lbl, bold in labels:
         if not p: continue
         tx, ty, anc = p
-        tl.append(f'<text x="{tx:.1f}" y="{ty:.1f}" text-anchor="{anc}" font-size="{fs if bold else fs * 0.92:.1f}" font-weight="{700 if bold else 500}" paint-order="stroke" stroke="#fff" stroke-width="{fs * 0.22:.1f}" stroke-linejoin="round" fill="#111">{escape(lbl)}</text>')
+        tl.append(f'<text x="{tx:.1f}" y="{ty:.1f}" text-anchor="{anc}" font-size="{fs:.1f}" font-weight="{700 if bold else 500}" paint-order="stroke" stroke="#fff" stroke-width="{fs * 0.22:.1f}" stroke-linejoin="round" fill="#111">{escape(lbl)}</text>')
     # bloc letters at hull tops
     for cid, (x, y) in hull_tops.items():
-        c = col(cid); r = fs * 0.62
-        tl.append(f'<circle cx="{x:.1f}" cy="{y - 2:.1f}" r="{r:.1f}" fill="{c}" stroke="#fff" stroke-width="1.5"/><text x="{x:.1f}" y="{y - 2 + fs * 0.27:.1f}" text-anchor="middle" font-size="{fs * 0.78:.1f}" font-weight="800" fill="{on_color(c)}">{letters[cid]}</text>')
+        c = col(cid); r = fs * 0.72
+        tl.append(f'<circle cx="{x:.1f}" cy="{y - 2:.1f}" r="{r:.1f}" fill="{c}" stroke="#fff" stroke-width="1.5"/><text x="{x:.1f}" y="{y - 2 + fs * 0.35:.1f}" text-anchor="middle" font-size="{fs:.1f}" font-weight="800" fill="{on_color(c)}">{letters[cid]}</text>')
     out.append('<g font-family="var(--sans)">' + ''.join(tl) + '</g>')
     return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="100%" aria-hidden="true" focusable="false">' + ''.join(out) + '</svg>'
 
 def main(graph_json, outdir):
     d = json.load(open(graph_json, encoding='utf-8'))
     os.makedirs(outdir, exist_ok=True)
-    open(os.path.join(outdir, 'overview-wide.svg'), 'w', encoding='utf-8').write(render(d, 1000, 15, False))
-    open(os.path.join(outdir, 'overview-narrow.svg'), 'w', encoding='utf-8').write(render(d, 1000, 31, True))
+    open(os.path.join(outdir, 'overview-wide.svg'), 'w', encoding='utf-8').write(render(d, 1000, 18, False))
+    open(os.path.join(outdir, 'overview-narrow.svg'), 'w', encoding='utf-8').write(render(d, 1000, 38, True))
 
 if __name__ == '__main__':
     here = os.path.dirname(os.path.abspath(__file__))

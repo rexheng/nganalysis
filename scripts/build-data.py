@@ -453,7 +453,7 @@ rank_reach, rr0 = reach_ranks(base_outs, tgrp)
 rank_bc = rank_competition(cand_bridge, lambda n: (-round(bc_core.get(n, 0), 9), nm(n)))
 end_edges = [(e['s'], e['t']) for e in edges if e['kind'] == 'endorsement']
 mem_edges = [(e['s'], e['t']) for e in edges if e['kind'] == 'member']
-BOOT = 200; BOOT_RUNS = 200; TOPK = 10
+BOOT = 200; BOOT_RUNS = 1000; TOPK = 10
 def boot_rep(seed):
     """drop 10% of endorsements, re-cluster from scratch (BOOT_RUNS shuffled Louvain runs), recount coalitions reached"""
     rng_ = random.Random(1_000_003 * (seed + 1))
@@ -492,6 +492,16 @@ top_reach = collections.Counter(n for b_, _, _ in boot for n in b_)
 boot_ngroups = collections.Counter(k_ for _, k_, _ in boot)
 boot_fate = [dict(collections.Counter(f_[bi] for _, _, f_ in boot)) for bi in range(len(bloc_list))]
 boot_intact_all = sum(all(x == 'intact' for x in f_) for _, _, f_ in boot)
+def wilson(k_, n_, z=1.96):
+    if not n_: return (0.0, 0.0)
+    ph = k_ / n_; den = 1 + z * z / n_; cen = (ph + z * z / (2 * n_)) / den; hw = z * math.sqrt(ph * (1 - ph) / n_ + z * z / (4 * n_ * n_)) / den
+    return (max(0.0, cen - hw), min(1.0, cen + hw))
+for bi, cm in enumerate(comm_meta):   # data survival per coalition: intact in how many of the BOOT resamples (+ 95% Wilson range)
+    f_ = boot_fate[bi]; k_ = f_.get('intact', 0)
+    joiners = collections.Counter(j for key_, v_ in f_.items() if key_.startswith('joined:') for j in key_[7:].split('|') for _ in range(v_))
+    lo_, hi_ = wilson(k_, BOOT)
+    cm.update(intact=k_, intactShare=round(k_ / BOOT, 3), intactLo=round(lo_, 3), intactHi=round(hi_, 3), boots=BOOT,
+              split=f_.get('split', 0), joiners=[dict(t=t_, n=n_) for t_, n_ in joiners.most_common(3)])
 rng = random.Random(20261103)
 top_bc = collections.Counter()
 for bi_ in range(100):   # betweenness: 100 edge resamples (no clustering involved)
@@ -614,6 +624,23 @@ if slate_id and endorsers_of.get(slate_id):
                          topKShare={str(k_): round(holdk[k_] / HB, 3) for k_ in range(1, 5)},
                          top2Share=round(hold2 / HB, 3), top1Share=round(hold1 / HB, 3), resamples=HB,
                          nSlateEndorsers=len(endorsers_of[slate_id]))
+    # base rate: among endorsers who do NOT back the slate and back 2+ candidates, the share backing each candidate
+    n_targets = collections.Counter(s_ for t in tg_all for s_ in endorsers_of[t])
+    others = {s_ for s_, k_ in n_targets.items() if k_ >= 2 and s_ not in endorsers_of[slate_id]}
+    for c_ in slate_overlap['council']:
+        c_['base'] = round(len(others & endorsers_of[c_['t']]) / len(others), 4) if others else 0
+        c_['nList'] = len(endorsers_of[c_['t']])
+    slate_overlap['nOthersMulti'] = len(others)
+    # bootstrap of the slate's own backers (with replacement): how often does the top candidate by count lead the runner-up?
+    by_n = sorted(slate_overlap['council'], key=lambda c_: (-c_['n'], nm(c_['t'])))
+    if len(by_n) >= 2:
+        A_, B_ = by_n[0]['t'], by_n[1]['t']; SL = sorted(endorsers_of[slate_id]); rngl = random.Random(7); LB = 10000
+        lead = tie = majA = majB = 0
+        for _ in range(LB):
+            smp = [rngl.choice(SL) for _ in SL]
+            a_ = sum(x in endorsers_of[A_] for x in smp); b_ = sum(x in endorsers_of[B_] for x in smp)
+            lead += a_ > b_; tie += a_ == b_; majA += 2 * a_ > len(SL); majB += 2 * b_ > len(SL)
+        slate_overlap['leadBoot'] = dict(a=A_, b=B_, resamples=LB, aLeads=round(lead / LB, 3), tie=round(tie / LB, 3), aMajority=round(majA / LB, 3), bMajority=round(majB / LB, 3))
 # withdrawn candidates analysed as endorsers: reader-facing note
 for n in nodes:
     if nodes[n].get('analysisEndorser'):

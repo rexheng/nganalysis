@@ -15,6 +15,7 @@ export interface Community {
   id: number; size: number; targets: string[]; anchors: string[]; weakest: { a: string; b: string; p: number; pPooled: number; pConf: number }; mean: number; meanConf: number;
   borderline: boolean; ambiguous: Ambig[];
   nEndorsersOfTargets: number; typeCounts: Record<string, number>;
+  intact?: number; intactShare?: number; intactLo?: number; intactHi?: number; boots?: number; split?: number; joiners?: { t: string; n: number }[];
 }
 export interface Loose { id: string; best: number; bestConf: number; partners: { t: string; p: number; pConf: number }[]; groupedIn: { members: string[]; where: string[] }[]; nearBloc?: number; nearMin?: number; nearMinConf?: number }
 export interface Variant { members: string[]; where: string[]; meanAll: number; meanConf: number }
@@ -26,7 +27,8 @@ export interface Bridge {
 }
 export interface Overlap { a: string; b: string; n: number; j: number; oc: number; shared: string[] }
 export interface SlateOverlap {
-  slate: string; council: { t: string; j: number; n: number }[]; topKShare: Record<string, number>; top1Share: number; top2Share: number;
+  slate: string; council: { t: string; j: number; n: number; base?: number; nList: number }[]; nOthersMulti?: number;
+  leadBoot?: { a: string; b: string; resamples: number; aLeads: number; tie: number; aMajority: number; bMajority: number }; topKShare: Record<string, number>; top1Share: number; top2Share: number;
   resamples: number; nSlateEndorsers: number;
 }
 export interface Summary {

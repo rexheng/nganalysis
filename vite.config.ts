@@ -17,7 +17,7 @@ function bakeText(): Plugin {
       const d = load();
       const svg = (n: string) => readFileSync(new URL(`./src/generated/overview-${n}.svg`, import.meta.url), 'utf-8');
       const t = buildTexts(d);
-      const findings = t.findings.map((f) => (f.startsWith('<p') ? f : `<p>${f}</p>`)).join('\n');
+      const findings = t.findings.map((f, i) => (f.startsWith('<p') ? f : `<p>${f}</p>`) + (i === 0 && t.strip ? t.strip : '')).join('\n');
       return html
         .replace(/%TITLE%/g, esc(t.title)).replace(/%DESC%/g, esc(t.description)).replace(/%HEADLINE%/g, esc(t.headline))
         .replace('<!--HEADLINE-->', esc(t.headline)).replace('<!--STATS-->', esc(t.statsLine))

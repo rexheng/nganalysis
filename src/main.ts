@@ -8,6 +8,7 @@ import type { Data, GNode, GEdge, Bridge } from './types';
 import {
   commColor, commName, LETTERS, esc, index, bridgeSentence, listJoin, numWord, chip, nlink, typeGlyph, TYPE_ORDER, TYPE_RAMP,
   blocName, campOf, nCamps, pct, raceShort, srcLabel, srcHref, shortName, surname, robustBridges, pairPct, onColor, plural, pctCut, weakPct, marginLabel, nearMisses,
+  intactRange, intactNote,
 } from './text';
 const isProb = (e: { conf?: string }) => /probable/i.test(e.conf || '');
 
@@ -20,6 +21,7 @@ const norm = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').t
 const narrowMQ = window.matchMedia('(max-width: 640px)');
 const stackMQ = window.matchMedia('(max-width: 899px)');
 const hoverMQ = window.matchMedia('(hover: hover) and (pointer: fine)');
+const midMQ = window.matchMedia('(min-width: 1024px) and (max-width: 1279px)');   // ring names only on hover or focus here
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -205,6 +207,7 @@ async function main() {
   const lblName = (n: GNode) => (n.type === 'Slate' ? n.name : shortName(n));
   const altName = (n: GNode) => (n.type === 'Slate' ? 'Slate' : /Individual|official|Candidate/.test(n.type) ? surname(n) : lblName(n));
   const ringNum = (id: string) => (state.view === 'bridges' ? rankOf(id) : coalTopBridges().indexOf(id) + 1);
+  let peek: string | null = null;   // a node whose name is hovered or focused in the panel or legend
   function labelPlan(): Lab[] {
     const L: Lab[] = []; const narrow = narrowMQ.matches;
     const active = state.hovered || state.selected;
@@ -216,7 +219,7 @@ async function main() {
     if (active) { const n = byId.get(active)!; push(active, [n.name, lblName(n), altName(n)], true, 750); }
     // numbered rings: names where they fit, at least the number
     const tb = [...TOPB].filter((id) => !active || (FOCUS && FOCUS.has(id)));
-    tb.forEach((id) => { const n = byId.get(id)!; const k = ringNum(id); push(id, [`${k}. ${lblName(n)}`, `${k}. ${altName(n)}`, `${k}`], true, 750); });
+    tb.forEach((id) => { const n = byId.get(id)!; const k = ringNum(id); push(id, midMQ.matches && id !== peek ? [`${k}`] : [`${k}. ${lblName(n)}`, `${k}. ${altName(n)}`, `${k}`], true, 750); });
     // every candidate, at every width (dimmed when outside the focus)
     const cands = d.nodes.filter((n) => n.isTarget && g.hasNode(n.id)).sort((a, b) => Number(!!a.memberOf) - Number(!!b.memberOf) || b.inDeg - a.inDeg);
     const nbs = active && FOCUS ? [...FOCUS].filter((x) => x !== active) : [];
@@ -252,7 +255,7 @@ async function main() {
       for (const n of d.nodes) {
         if (n.community < 0 || !g.hasNode(n.id) || (FOCUS && !FOCUS.has(n.id))) continue;
         const p = vp(n.id); if (!p || p.r < (n.isTarget ? 7 : 6.5)) continue;
-        octx.font = `800 ${Math.min(13, p.r * 1.1)}px ${FONT}`; octx.textAlign = 'center'; octx.textBaseline = 'middle';
+        octx.font = `800 ${Math.max(12, Math.min(13, p.r * 1.1))}px ${FONT}`; octx.textAlign = 'center'; octx.textBaseline = 'middle';
         octx.fillStyle = onColor(commColor(n.community)); octx.fillText(LETTERS[n.community], p.x, p.y + 0.5);
       }
       octx.textAlign = 'left'; octx.textBaseline = 'alphabetic';
@@ -320,10 +323,26 @@ async function main() {
       const xs = core.map((n) => n.x), ys = core.map((n) => n.y);
       bbox = { x: [Math.min(...xs), Math.max(...xs)], y: [Math.min(...ys), Math.max(...ys)] };
     } else bbox = null;
-    if (renderer) renderer.setCustomBBox(bbox);
+    homeMemo = null; if (renderer) renderer.setCustomBBox(bbox);
   }
   const HOME = { x: 0.5, y: 0.5, ratio: 1, angle: 0 };
-  const home = () => ({ ...HOME, angle: narrowMQ.matches && !state.showAll ? Math.PI / 2 : 0 });   // portrait screens: turn the wide layout upright
+  // portrait screens: turn the wide layout upright, and lift it so its top sits just under the legend button (no dead band above)
+  let homeMemo: { k: string; v: { x: number; y: number; ratio: number; angle: number } } | null = null;
+  const home = () => {
+    const base = { ...HOME, angle: narrowMQ.matches && !state.showAll ? Math.PI / 2 : 0 };
+    if (!base.angle) return base;
+    const w = container.clientWidth, h = container.clientHeight; if (!w || !h) return base;
+    const k = `${w}x${h}`; if (homeMemo && homeMemo.k === k) return homeMemo.v;
+    const ext = bbox || graphExtent(g); const normF = createNormalizationFunction(ext);
+    const pts: { x: number; y: number }[] = []; g.forEachNode((_id, a) => { pts.push(normF({ x: a.x, y: a.y }) as any); });
+    const dims = { width: ext.x[1] - ext.x[0] || 1, height: ext.y[1] - ext.y[0] || 1 };
+    const topY = (c: typeof base) => { const M = matrixFromCamera(c, { width: w, height: h }, dims, SETTINGS.stagePadding); let m = Infinity; for (const p of pts) { const v = multiplyVec2(M, p as any); m = Math.min(m, ((1 - v.y) * h) / 2); } return m; };
+    const TARGET = 56, eps = 0.01;
+    const t0 = topY(base), gx = (topY({ ...base, x: base.x + eps }) - t0) / eps, gy = (topY({ ...base, y: base.y + eps }) - t0) / eps;
+    let v = base;
+    if (t0 > TARGET + 4) { if (Math.abs(gx) > Math.abs(gy) && gx) v = { ...base, x: base.x + (TARGET - t0) / gx }; else if (gy) v = { ...base, y: base.y + (TARGET - t0) / gy }; }
+    homeMemo = { k, v }; return v;
+  };
   setFrame();
   const goHome = () => { if (cam) cam.animate(home(), { duration: 300 }); else refresh(); };
   $('#zin').onclick = () => { ensureSigma(); cam!.animatedZoom({ duration: 250 }); };
@@ -447,7 +466,7 @@ async function main() {
     if (!b) return '';
     const sure = (ok: boolean) => (ok ? '<span class="ok">holds up</span>' : '<span class="unsure">less certain</span>');
     const why = (r: [boolean, string][]) => { const f = r.filter((x) => x[0]).map((x) => x[1]); return f.length ? `; but it ${listJoin(f)}` : ''; };
-    const bcWhy = b.robustBc ? '' : why([
+    const _bcWhy = b.robustBc ? '' : why([
       [b.topBc < 0.8, `is top ${K} in only ${pct(b.topBc)} of resamples`],
       [(b.bcLooWorst ?? 1e6) > K, `falls to ${b.bcLooWorst ? '#' + b.bcLooWorst : 'zero'} when one endorsement is removed`],
       [(b.rankBcConf ?? 1e6) > K, `ranks ${b.rankBcConf ? '#' + b.rankBcConf : 'nowhere'} without the probable endorsements`],
@@ -458,7 +477,7 @@ async function main() {
       [(b.looWorst ?? 1e6) > K, `falls to ${b.looWorst ? '#' + b.looWorst : 'one coalition'} when one endorsement is removed`],
       [(b.rankReachConf ?? 1e6) > K, `ranks #${b.rankReachConf} without the probable endorsements`],
     ]);
-    return `<p class="metric">Backs candidates in <strong>${b.reach} of ${nCamps(d)} coalitions</strong> · rank #${b.rankReach}${b.tie ? ' (tie)' : ''}${b.rankReachConf != null && b.rankReachConf !== b.rankReach ? ` (#${b.rankReachConf} excluding probable endorsements)` : ''} · ${sure(b.robustReach)} (top ${K} in ${pct(b.topReach)} of resamples${b.looWorst ? `; worst rank after removing any one endorsement: #${b.looWorst}` : ''}${reachWhy}).</p>${b.rankBc ? `<p class="metric small">Betweenness rank #${b.rankBc}${b.rankBcConf != null && b.rankBcConf !== b.rankBc ? ` (#${b.rankBcConf} excluding probable endorsements)` : ''} · ${sure(b.robustBc)} (top ${K} in ${pct(b.topBc)} of resamples${b.bcLooWorst ? `; worst after one removal: #${b.bcLooWorst}` : ''}${bcWhy})${b.bcLooOut?.length ? `. Without its endorsement of ${esc(d.nodes.find((x) => x.id === b.bcLooOut![0].t)!.name)} it would rank ${b.bcLooOut[0].rank ? '#' + b.bcLooOut[0].rank : 'below every other endorser'}` : ''}.</p>` : ''}`;
+    return `<p class="metric">Backs candidates in <strong>${b.reach} of ${nCamps(d)} coalitions</strong> · rank #${b.rankReach}${b.tie ? ' (tie)' : ''}${b.rankReachConf != null && b.rankReachConf !== b.rankReach ? ` (#${b.rankReachConf} excluding probable endorsements)` : ''} · ${sure(b.robustReach)} (top ${K} in ${pct(b.topReach)} of resamples${b.looWorst ? `; worst rank after removing any one endorsement: #${b.looWorst}` : ''}${reachWhy}).</p>${b.rankBc ? `<p class="metric small">Betweenness: #${b.rankBc}.${b.rankBcConf != null && b.rankBcConf !== b.rankBc ? ` Without the probable endorsements, #${b.rankBcConf}${b.bcLooWorstConf && b.bcLooWorstConf > b.rankBcConf ? `; drop one more, #${b.bcLooWorstConf}` : ''}.` : b.bcLooWorst && b.bcLooWorst > b.rankBc ? ` Drop one endorsement, #${b.bcLooWorst}.` : ''} ${b.robustBc ? '<span class="ok">Holds up.</span>' : '<span class="unsure">Less certain.</span>'}</p>` : ''}`;
   }
   function nodePanel(id: string) {
     const n = N(id);
@@ -500,16 +519,16 @@ async function main() {
       for (let i = 0; i < c.targets.length; i++) for (let j = i + 1; j < c.targets.length; j++) pairs.push(`<li>${esc(shortName(N(c.targets[i])))} & ${esc(shortName(N(c.targets[j])))}: <strong>${pairPct(ix.together(c.targets[i], c.targets[j]), togetherConf(c.targets[i], c.targets[j]), T)}</strong></li>`);
       return `<li class="coal"><div class="coal-h">${chip(c.id)}<strong>${esc(blocName(ix, c))}</strong></div>
         <p class="coal-c">${c.targets.map((t) => `${nlink(N(t))} <span class="race-tag">${esc(raceShort(N(t).race))}</span>`).join(', ')}</p>
-        <p class="small">Weakest pair ${esc(shortName(N(c.weakest.a)))} & ${esc(shortName(N(c.weakest.b)))}: <strong>${weakPct(d, c)}</strong>, ${marginLabel(d, c)}</p>
+        <p class="small">Weakest pair ${esc(shortName(N(c.weakest.a)))} & ${esc(shortName(N(c.weakest.b)))}: <strong>${weakPct(d, c)}</strong>, ${marginLabel(d, c)}${intactRange(c) ? `. Intact in ${intactRange(c)} of tries${(() => { const nt = intactNote(d, ix, c); return nt ? ` (${esc(nt)})` : ''; })()}` : ''}</p>
         ${pairs.length > 1 ? `<details class="pairs"><summary>All ${pairs.length} pairs</summary><ul>${pairs.join('')}</ul></details>` : ''}
         ${Object.keys(c.typeCounts).length ? typeBar(c.typeCounts) : ''}</li>`;
     }).join('');
     const loose = d.loose.map((l) => `<li>${nlink(N(l.id), undefined, 'strong')} <span class="race-tag">${esc(raceShort(N(l.id).race))}</span><br><span class="small">${(() => { const nm = nearMisses(d).find((x) => x.l.id === l.id); return nm ? `Just short of ${LETTERS[nm.c]}: ${pctCut(nm.v, T)}` : `Closest: ${listJoin(closest(l.id).slice(0, 2).map((p) => `${esc(shortName(N(p.t)))} (${pairPct(p.p, p.pConf, T)})`))}`; })()}</span></li>`).join('');
     const allTypes = [...new Set(d.communities.flatMap((c) => Object.keys(c.typeCounts)))];
     return `<h2 class="ph">${numWord(S.nBlocs).replace(/^./, (x) => x.toUpperCase())} ${plural(S.nBlocs, 'coalition')}</h2>
-      <p class="pintro">Every pair lands together in ≥${pct(T)} of ${S.nRuns.toLocaleString('en-US')} runs, with or without the probable endorsements. Thin margin: weakest pair under ${pct(T + (S.border ?? 0.05))}. Ranges: with and without the probable endorsements. Bars: endorsers by type.</p>
+      <p class="pintro">Every pair lands together in at least ${pct(T)} of ${S.nRuns.toLocaleString('en-US')} runs. Bars: endorsers by type.</p>
       <ol class="coals">${items}</ol>${typeKey(allTypes)}
-      <h3>No coalition <span class="cnt">${d.loose.length + isolated.length}</span></h3><ul class="loose">${loose}${isolated.map((n) => `<li>${nlink(n, undefined, 'strong')} <span class="race-tag">${esc(raceShort(n.race))}</span><br><span class="small">No endorsements recorded</span></li>`).join('')}</ul>`;
+      <h3>No coalition <span class="cnt">${d.loose.length + isolated.length}</span></h3><p class="small muted">Ranges: with/without probable.</p><ul class="loose">${loose}${isolated.map((n) => `<li>${nlink(n, undefined, 'strong')} <span class="race-tag">${esc(raceShort(n.race))}</span><br><span class="small">No endorsements recorded</span></li>`).join('')}</ul>`;
   }
 
   function stackBar(b: Bridge) {
@@ -598,7 +617,7 @@ async function main() {
       : TYPE_ORDER.filter((t) => d.nodes.some((n) => n.type === t)).map((t) => `<li><span class="dot" style="background:${TYPE_RAMP[t]}"></span><span>${esc(t)}</span></li>`).join('');
     const ring = state.view === 'race' ? 'endorser shared within the race' : state.view === 'bridges' ? `top ${narrowMQ.matches ? 5 : K} (number = rank)` : 'spans the most coalitions';
     L.innerHTML = `<ul>${items}<li><span class="dot" style="background:${LEAF}"></span><span>backs one candidate</span></li></ul>
-      <p><span class="lline"></span>endorsement <span class="lline dark"></span>crosses coalitions <span class="lline prob"></span>probable${memberEdges.length ? ' <span class="lline mem"></span>slate link' : ''} <span class="ringk"></span>${ring}</p>`;
+      <p><span class="lline"></span>endorsement <span class="lline dark"></span>crosses coalitions <span class="lline prob"></span>probable${memberEdges.length ? ' <span class="lline mem"></span>slate link' : ''} <span class="ringk"></span>${ring}</p>${narrowMQ.matches && TOPB.size && state.view !== 'race' ? `<ol class="lbr">${[...TOPB].map((id) => ({ id, k: ringNum(id) })).sort((a, b) => (a.k ?? 99) - (b.k ?? 99)).map((x) => `<li><span class="ringn">${x.k}</span> <a href="?node=${encodeURIComponent(x.id)}" data-node="${esc(x.id)}">${esc(N(x.id).name)}</a></li>`).join('')}</ol>` : ''}`;
   }
   // ---------- bottom sheet (narrow screens) ----------
   const sheet = $('#sheet'); const handle = $<HTMLButtonElement>('#sheetbtn');
@@ -647,6 +666,9 @@ async function main() {
   $<HTMLInputElement>('#showall').addEventListener('change', (e) => { state.showAll = (e.target as HTMLInputElement).checked; setFrame(); cam?.setState(home()); recompute(); refresh(); renderLegend(); });
   $<HTMLSelectElement>('#colorby').addEventListener('change', (e) => { state.colorBy = (e.target as HTMLSelectElement).value as any; refresh({ skipIndexation: true }); renderLegend(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.selected) select(null); });
+  const setPeek = (ev: Event) => { const t = (ev.target as HTMLElement)?.closest?.<HTMLElement>('[data-node]'); const id = t && ev.type !== 'focusout' && ev.type !== 'mouseout' ? t.dataset.node! : null; if (id !== peek) { peek = id; drawOverlay(); } };
+  for (const ev of ['focusin', 'focusout', 'mouseover', 'mouseout']) document.addEventListener(ev, setPeek, { passive: true });
+  midMQ.addEventListener('change', () => drawOverlay());
   narrowMQ.addEventListener('change', () => { setFrame(); cam?.setState(home()); recompute(); refresh(); renderLegend(); });
 
   // ---------- search (ARIA combobox) ----------
@@ -705,7 +727,7 @@ async function main() {
   await tick(); applyHash();
   (window as any).__test = {
     pos: (id: string) => { if (!renderer) { const p = pvPos.get(id); return p ? { x: p.x, y: p.y } : null; } const dd: any = renderer.getNodeDisplayData(id); return dd ? renderer.framedGraphToViewport({ x: dd.x, y: dd.y }) : null; },
-    sigma: () => !!renderer,
+    sigma: () => !!renderer, home: () => home(),
     byName: (n: string) => ix.byName.get(n)?.id, state,
     cands: () => d.nodes.filter((n) => n.isTarget && g.hasNode(n.id)).map((n) => n.id),
     leaf: (id: string) => !!byId.get(id)?.leaf,
