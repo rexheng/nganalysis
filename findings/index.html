@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Findings and methods · %TITLE%</title>
+<meta name="description" content="%DESC%" />
+<meta property="og:title" content="%HEADLINE%" />
+<meta property="og:description" content="%DESC%" />
+<meta property="og:type" content="article" />
+<meta name="theme-color" content="#ffffff" />
+<link rel="preload" href="/fonts/source-serif-4-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='9' cy='10' r='5' fill='%23E69F00'/%3E%3Ccircle cx='23' cy='10' r='5' fill='%23332288'/%3E%3Ccircle cx='16' cy='23' r='5' fill='%2344AA99'/%3E%3Cpath d='M9 10L23 10L16 23Z' stroke='%23222' fill='none' stroke-width='1.5'/%3E%3C/svg%3E" />
+</head>
+<body>
+<header class="masthead"><div class="wrap ab-row"><span class="kicker">The Daily Californian · Election 2026</span><a class="storylink" href="/">← Interactive graph</a></div></header>
+<main>
+<article class="story wrap">
+  <p class="draft" role="note">Draft: pre-editing. Not yet reviewed by Daily Cal editors.</p>
+  <h1><!--HEADLINE--></h1>
+  <p class="stats"><!--STATS--></p>
+  <section class="findings" aria-label="Findings"><!--FINDINGS--></section>
+</article>
+<figure class="overview wrap-wide" aria-labelledby="ov-cap">
+  <div class="ov-art" role="img" aria-labelledby="ov-alt">
+    <div class="svg-wide"><!--OVERVIEW_WIDE--></div>
+    <div class="svg-narrow"><!--OVERVIEW_NARROW--></div>
+  </div>
+  <figcaption id="ov-cap" class="ov-key"><p class="ov-title">The core of the network</p><!--OVERVIEW_KEY--></figcaption>
+  <p id="ov-alt" class="sr"><!--OVERVIEW_ALT--></p>
+</figure>
+<section class="matrix-sec wrap-wide" aria-labelledby="hmh">
+  <h2 id="hmh">How often two candidates land together</h2>
+  <p class="sub">Percent of <!--SEEDS--> clustering runs. Outlined: same coalition. “s”: slate member.</p>
+  <p class="scrollhint" aria-hidden="true">Scroll sideways →</p>
+  <div id="heatmap" class="mwrap"></div>
+</section>
+<section class="matrix-sec overlap-sec wrap-wide" aria-labelledby="ovh">
+  <h2 id="ovh">How much endorser lists overlap</h2>
+  <p class="sub">Shared endorsers as a percent of everyone on either list. Tap or hover for names. Blank: none.</p>
+  <p class="scrollhint" aria-hidden="true">Scroll sideways →</p>
+  <div id="overlap" class="mwrap"></div>
+</section>
+<article class="methods wrap"><!--METHODS--></article>
+</main>
+<footer class="foot wrap"><p><a href="/">← Back to the interactive graph</a></p></footer>
+<script type="module" src="/src/findings.ts"></script>
+</body>
+</html>

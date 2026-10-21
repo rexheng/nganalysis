@@ -243,7 +243,8 @@ for n in nodes:
 is_ctarget = lambda n: nodes[n].get('isTarget') and not nodes[n].get('analysisEndorser')
 import random, numpy as np
 from multiprocessing import Pool
-RUNS = args.seeds if args.seeds >= 1000 else 1000; BATCHES = 5
+POOL = max(args.seeds, 20000)            # Louvain runs per pool
+SEED_BASES = [0, 10_000_000]              # two independent pools (different seeds and shuffles)
 CORE_NL = sorted(core.nodes()); CORE_EL = sorted(tuple(sorted(e)) for e in core.edges())
 core_ix = {n: i for i, n in enumerate(CORE_NL)}
 def louvain_shuffled(job):
@@ -263,48 +264,97 @@ def coassign(M, cols):
     for i in range(len(cols)):
         out[i] = (sub == sub[:, [i]]).mean(0)
     return out
-def complete_linkage(ids, P_, th):
-    """greedy complete linkage: merge the two clusters whose weakest cross pair is strongest, while >= th"""
-    cl = [[i] for i in range(len(ids))]
+def avg_linkage(ids, P_, th):
+    """average-linkage agglomerative clustering on a co-assignment matrix, cut at th:
+    keep merging the two clusters with the highest mean cross-pair co-assignment while that mean is >= th.
+    Deterministic given the matrix. Returns (groups, merge values, first refused merge value)."""
+    cl = [[i] for i in range(len(ids))]; merges = []; refused = None
     while len(cl) > 1:
         bm = None
-        for a in range(len(cl)):
-            for b in range(a + 1, len(cl)):
-                mn = min(P_[x, y] for x in cl[a] for y in cl[b])
-                if bm is None or mn > bm[0] + 1e-12: bm = (mn, a, b)
-        if bm[0] < th: break
-        _, a, b = bm; cl[a] += cl[b]; del cl[b]
-    return [frozenset(ids[x] for x in c) for c in cl]
+        for a_ in range(len(cl)):
+            for b_ in range(a_ + 1, len(cl)):
+                v = float(np.mean([P_[x, y] for x in cl[a_] for y in cl[b_]]))
+                if bm is None or v > bm[0] + 1e-12: bm = (v, a_, b_)
+        if bm[0] < th: refused = (bm[0], frozenset(ids[x] for x in cl[bm[1]] + cl[bm[2]])); break
+        merges.append((bm[0], frozenset(ids[x] for x in cl[bm[1]] + cl[bm[2]])))
+        cl[bm[1]] += cl[bm[2]]; del cl[bm[2]]
+    return [frozenset(ids[x] for x in c) for c in cl], merges, refused
 ROBUST = 0.75; BORDER = 0.05
-with Pool(min(8, os.cpu_count() or 1)) as pool:
-    res = pool.map(louvain_shuffled, [(CORE_NL, CORE_EL, s) for s in range(RUNS * BATCHES)], chunksize=50)
-MALL = np.array([r_[0] for r_ in res]); R = len(res)
-n_comm_dist = collections.Counter(r_[1] for r_ in res)
 targets_core = sorted([n for n in core if is_ctarget(n)], key=nm)
-tcols = [core_ix[t] for t in targets_core]; tix = {t: i for i, t in enumerate(targets_core)}
-batch_P = [coassign(MALL[b * RUNS:(b + 1) * RUNS], tcols) for b in range(BATCHES)]
-P_pool = coassign(MALL, tcols)
-P_min = np.minimum.reduce(batch_P)
+tix = {t: i for i, t in enumerate(targets_core)}
+def build_core(drop_edges):
+    G = nx.Graph(); G.add_nodes_from(nodes)
+    for e in edges:
+        if e['kind'] == 'endorsement' and (e['s'], e['t']) in drop_edges: continue
+        G.add_edge(e['s'], e['t'])
+    dg = dict(G.degree()); lv = {x for x in G if dg[x] == 1 and x not in cand_ids}
+    return G.subgraph([x for x in G if x not in lv and dg[x] > 0]).copy()
+def analyse(g_, pool):
+    nl = sorted(g_.nodes()); el = sorted(tuple(sorted(e)) for e in g_.edges()); ix_ = {n: i for i, n in enumerate(nl)}
+    cols = [ix_[t] for t in targets_core]
+    Ms, kd = [], collections.Counter()
+    for base in SEED_BASES:
+        res_ = pool.map(louvain_shuffled, [(nl, el, base + k) for k in range(POOL)], chunksize=200)
+        Ms.append(np.array([r_[0] for r_ in res_], dtype=np.int16)); kd.update(r_[1] for r_ in res_)
+    Ps = [coassign(M_, cols) for M_ in Ms]
+    parts = [avg_linkage(targets_core, P_, ROBUST) for P_ in Ps]
+    Mall = np.vstack(Ms)
+    return dict(nl=nl, ix=ix_, Ps=Ps, P=coassign(Mall, cols), Mall=Mall, parts=parts, kdist=kd)
+prob_edges = {(e['s'], e['t']) for e in edges if e['kind'] == 'endorsement' and 'probable' in (e.get('conf') or '').lower()}
+with Pool(min(8, os.cpu_count() or 1)) as pool:
+    AN = {'all': analyse(core, pool)}
+    AN['conf'] = analyse(build_core(prob_edges), pool) if prob_edges else AN['all']
+R = POOL * len(SEED_BASES)
+n_comm_dist = AN['all']['kdist']
+P_pool = AN['all']['P']; P_conf = AN['conf']['P']
+MALL = AN['all']['Mall']
 def together(a, b): return 1.0 if a == b else float(P_pool[tix[a], tix[b]]) if a in tix and b in tix else 0.0
-def together_min(a, b): return 1.0 if a == b else float(P_min[tix[a], tix[b]]) if a in tix and b in tix else 0.0
-batch_parts = [complete_linkage(targets_core, Pb, ROBUST) for Pb in batch_P]
-# meet of the batch partitions: candidates stay together only if every batch puts them in the same group
+def together_conf(a, b): return 1.0 if a == b else float(P_conf[tix[a], tix[b]]) if a in tix and b in tix else 0.0
+def together_min(a, b): return min(together(a, b), together_conf(a, b))
+# every partition (2 pools x with/without probable edges); a coalition is reported only if ALL of them contain it
+variant_parts = {f'{k}{i}': [c for c in AN[k]['parts'][i][0]] for k in ('all', 'conf') for i in range(len(SEED_BASES))}
+pools_agree = {k: {c for c in AN[k]['parts'][0][0] if len(c) > 1} == {c for c in AN[k]['parts'][1][0] if len(c) > 1} for k in ('all', 'conf')}
 meet = {}
 for t in targets_core:
-    meet.setdefault(tuple(next(i for i, c in enumerate(bp) if t in c) for bp in batch_parts), []).append(t)
+    meet.setdefault(tuple(next(i for i, c in enumerate(vp) if t in c) for vp in variant_parts.values()), []).append(t)
 bloc_list = [sorted(g_, key=nm) for g_ in meet.values() if len(g_) >= 2]
 def endorsers_of_set(ts):
     out_ = set()
     for t in ts: out_ |= set(D.predecessors(t))
     return out_
 bloc_list.sort(key=lambda c: (-len(endorsers_of_set(c)), min(nm(x) for x in c)))
+final_sets = {frozenset(c) for c in bloc_list}
 loose = sorted([g_[0] for g_ in meet.values() if len(g_) == 1], key=lambda n: -D.in_degree(n))
-batch_exact = [sum(1 for bp in batch_parts if frozenset(c) in bp) for c in bloc_list]
+# groupings that appear in some partitions but not all: reported as such, never as coalitions
+def mean_p(Pm, grp): 
+    g_ = sorted(grp); v = [Pm[tix[x], tix[y]] for i, x in enumerate(g_) for y in g_[i+1:]]
+    return round(float(np.mean(v)), 3) if v else 1.0
+variants = []
+for key_, vp in variant_parts.items():
+    for c in vp:
+        if len(c) < 2 or c in final_sets: continue
+        v_ = next((x for x in variants if x['set'] == c), None)
+        if not v_: v_ = dict(set=c, where=[]); variants.append(v_)
+        v_['where'].append(key_)
+variants_meta = [dict(members=sorted(v_['set'], key=lambda n: -D.in_degree(n)), where=sorted(v_['where']),
+                      meanAll=mean_p(P_pool, v_['set']), meanConf=mean_p(P_conf, v_['set'])) for v_ in variants]
+variants_meta.sort(key=lambda v_: (-len(v_['where']), -len(v_['members'])))
+refusals = {k_: [dict(set=sorted(AN[k]['parts'][i][2][1], key=nm), v=round(AN[k]['parts'][i][2][0], 4)) if AN[k]['parts'][i][2] else None
+                 for i in range(len(SEED_BASES))] for k_, k in (('all', 'all'), ('conf', 'conf'))}
+merge_vals = {k: [[dict(set=sorted(m_[1], key=nm), v=round(m_[0], 4)) for m_ in AN[k]['parts'][i][1]] for i in range(len(SEED_BASES))] for k in ('all', 'conf')}
+borderline_pairs = []
+for i, x in enumerate(targets_core):
+    for y in targets_core[i+1:]:
+        pa, pc = together(x, y), together_conf(x, y)
+        if any(abs(v - ROBUST) <= BORDER for v in (pa, pc)):
+            borderline_pairs.append(dict(a=x, b=y, p=round(pa, 3), pConf=round(pc, 3)))
+borderline_pairs.sort(key=lambda b_: -max(b_['p'], b_['pConf']))
 bloc_of = {t: bi for bi, c in enumerate(bloc_list) for t in c}
 comm = {t: bloc_of.get(t, -1) for t in targets_core}
 # endorsers in the core join a coalition only if, on average, they sit with its candidates in >= ROBUST of all runs
 end_bloc_score = {}
 bloc_cols = [[core_ix[t] for t in c] for c in bloc_list]
+assert AN['all']['nl'] == CORE_NL
 for n in core:
     if n in comm: continue
     col_n = MALL[:, core_ix[n]][:, None]
@@ -321,19 +371,19 @@ for bi, c in enumerate(bloc_list):
     pairs = [(x, y) for i, x in enumerate(c) for y in c[i+1:]]
     wa, wb = min(pairs, key=lambda pr: (together_min(*pr), together(*pr)))
     wmin = together_min(wa, wb)
-    # members also tied (>= ROBUST in every batch) to a candidate outside the group: their placement is ambiguous
-    amb = []
+    amb = []   # members tied (within the borderline band or above) to a candidate outside the group
     for t in c:
         for o in targets_core:
-            if o not in c and together_min(t, o) >= ROBUST - BORDER:
-                amb.append(dict(t=t, o=o, p=round(together(t, o), 3), pmin=round(together_min(t, o), 3)))
+            if o not in c and max(together(t, o), together_conf(t, o)) >= ROBUST - BORDER:
+                amb.append(dict(t=t, o=o, p=round(together(t, o), 3), pConf=round(together_conf(t, o), 3)))
     members_all = [n for n in U if comm[n] == bi]
     endorsers_all = [n for n in members_all if not is_ctarget(n)]
     tc = collections.Counter(nodes[n]['type'] for n in endorsers_all)
     comm_meta.append(dict(id=bi, size=len(members_all), targets=sorted(c, key=lambda n: -D.in_degree(n)),
                           anchors=sorted(anchors(c), key=lambda n: -D.in_degree(n)),
-                          weakest=dict(a=wa, b=wb, p=round(wmin, 3), pPooled=round(together(wa, wb), 3)),
-                          borderline=wmin < ROBUST + BORDER, ambiguous=amb, batchesExact=batch_exact[bi],
+                          weakest=dict(a=wa, b=wb, p=round(wmin, 3), pPooled=round(together(wa, wb), 3), pConf=round(together_conf(wa, wb), 3)),
+                          mean=mean_p(P_pool, c), meanConf=mean_p(P_conf, c),
+                          borderline=wmin < ROBUST + BORDER, ambiguous=amb,
                           nEndorsersOfTargets=len(endorsers_of_set(c)), typeCounts=dict(tc.most_common())))
 ties = []
 units = [('b', bi, c) for bi, c in enumerate(bloc_list)] + [('t', t, [t]) for t in loose]
@@ -346,9 +396,11 @@ for i, (ka, ia, ca) in enumerate(units):
 ties.sort(key=lambda t_: -t_['max'])
 loose_meta = []
 for t in loose:
-    ps = sorted(((round(together(t, o), 3), round(together_min(t, o), 3), o) for o in targets_core if o != t), key=lambda x: (-x[0], nm(x[2])))
-    top = ps[0][0] if ps else 0
-    loose_meta.append(dict(id=t, best=top, partners=[dict(t=o, p=v, pmin=vm) for v, vm, o in ps if v >= top - 0.01 or v >= ROBUST - BORDER][:6]))
+    ps = sorted(((round(together(t, o), 3), round(together_conf(t, o), 3), o) for o in targets_core if o != t), key=lambda x: (-max(x[0], x[1]), nm(x[2])))
+    top = max(ps[0][0], ps[0][1]) if ps else 0
+    loose_meta.append(dict(id=t, best=round(max(p_[0] for p_ in ps), 3) if ps else 0, bestConf=round(max(p_[1] for p_ in ps), 3) if ps else 0,
+                           partners=[dict(t=o, p=v, pConf=vc) for v, vc, o in ps if max(v, vc) >= top - 0.01 or max(v, vc) >= ROBUST - BORDER][:6],
+                           groupedIn=[dict(members=v_['members'], where=v_['where']) for v_ in variants_meta if t in v_['members']]))
 
 # ---------- betweenness + "spanning" endorsers ----------
 bc_core = nx.betweenness_centrality(core, normalized=True)
@@ -397,7 +449,7 @@ def boot_rep(seed):
     M = np.array([louvain_shuffled((nl, el, seed * 10_000 + k))[0] for k in range(BOOT_RUNS)])
     tg = [t for t in targets_core if t in ixx]
     Pb = coassign(M, [ixx[t] for t in tg])
-    groups = [c for c in complete_linkage(tg, Pb, ROBUST) if len(c) >= 2]
+    groups = [c for c in avg_linkage(tg, Pb, ROBUST)[0] if len(c) >= 2]
     grp = {t: gi for gi, c in enumerate(groups) for t in c}
     om = collections.defaultdict(list)
     for s_, t_ in keep: om[s_].append(t_)
@@ -451,7 +503,7 @@ def core_from(end_list):
 conf_edges = [e_ for e_ in end_edges if e_ not in prob_edges]
 bc_conf = nx.betweenness_centrality(core_from(conf_edges), normalized=True) if prob_edges else bc_core
 rank_bc_conf = rank_competition(cand_bridge, lambda n: (-round(bc_conf.get(n, 0), 9), nm(n)))
-bc_loo_worst_conf = {}
+bc_loo_worst_conf = {}; bc_loo_edge_conf = {}
 if prob_edges:   # leave-one-edge-out on the confirmed-only graph too, for its top contenders
     core_c = core_from(conf_edges)
     bc_loo_worst_conf = {n: rank_bc_conf[n] for n in cand_bridge if bc_conf.get(n, 0) > 0 and rank_bc_conf[n] <= 15}
@@ -463,7 +515,7 @@ if prob_edges:   # leave-one-edge-out on the confirmed-only graph too, for its t
         rkb = rank_competition(cand_bridge, lambda n: (-round(b_.get(n, 0), 9), nm(n)))
         for n in bc_loo_worst_conf:
             rnew = rkb[n] if b_.get(n, 0) > 0 else 10**6
-            if rnew > bc_loo_worst_conf[n]: bc_loo_worst_conf[n] = rnew
+            if rnew > bc_loo_worst_conf[n]: bc_loo_worst_conf[n] = rnew; bc_loo_edge_conf[n] = list(e_)
 conf_outs = {n: [t for t in base_outs[n] if (n, t) not in prob_edges] for n in cand_bridge}
 rank_reach_conf, rr_conf = reach_ranks(conf_outs, tgrp)
 bridges = []
@@ -640,9 +692,9 @@ summary = dict(
     nNodes=len(nodes), nEndorsers=n_end, nSingle=single,
     nCandidates=len([n for n in cand_names if n != SLATE]),
     nCore=core.number_of_nodes(), nCoreEdges=core.number_of_edges(),
-    runs=RUNS, batches=BATCHES, nRuns=R, border=BORDER,
-    batchPartitions=[sorted([sorted(nm(x) for x in c) for c in bp if len(c) >= 2]) for bp in batch_parts],
-    batchesAgree=sum(1 for bp in batch_parts if {c for c in bp if len(c) >= 2} == {frozenset(c) for c in bloc_list}),
+    runs=POOL, pools=len(SEED_BASES), nRuns=R, border=BORDER, linkage='average', poolsAgree=pools_agree,
+    variantPartitions={k_: sorted([sorted(nm(x) for x in c) for c in vp if len(c) >= 2]) for k_, vp in variant_parts.items()},
+    refusedMerges={k_: [dict(set=[nm(x) for x in r_['set']], v=r_['v']) if r_ else None for r_ in v_] for k_, v_ in refusals.items()},
     bootGroups={str(k): v for k, v in sorted(boot_ngroups.items())},
     nCommunitiesDistribution={str(k): v for k, v in sorted(n_comm_dist.items())},
     relCounts=dict(collections.Counter(e['rel'] for e in edges if e['kind'] == 'endorsement')),
@@ -693,9 +745,13 @@ for i_, u in enumerate(urls):
     if 'acvote' in u or ty.lower().startswith('voter guide'): lab = 'Alameda County voter guide'
     elif ty.lower() == PRIMARY:
         lab = collections.Counter(nodes[e['s']]['name'] for e in cites if e['kind'] == 'endorsement').most_common(1)[0][0]
+        if host(u) == 'web.archive.org': lab = f'Wayback Machine copy of {lab} page'
     elif ty.lower().startswith('campaign'):
-        own = [nodes[t]['name'] for t in nodes if nodes[t].get('isTarget') and any(host(x) == host(u) for x in [nodes[t].get('campaignUrl') or '', nodes[t].get('endorsementsPage') or ''] if x)]
-        lab = (own[0] if own else collections.Counter(nodes[e['t']]['name'] for e in cites).most_common(1)[0][0]) + ' campaign site'
+        own_ids = [t for t in nodes if nodes[t].get('isTarget') and any(host(x) == host(u) for x in [nodes[t].get('campaignUrl') or '', nodes[t].get('endorsementsPage') or ''] if x)]
+        sl_ = [t for t in own_ids if nodes[t]['type'] == 'Slate']
+        own = [nodes[t]['name'] for t in own_ids]
+        if sl_: lab = nodes[sl_[0]]['name'] + ' site'
+        else: lab = (own[0] if own else collections.Counter(nodes[e['t']]['name'] for e in cites).most_common(1)[0][0]) + ' campaign site'
     else: lab = {'ballotpedia.org': 'Ballotpedia', 'bayballot.com': 'Bay Ballot', 'berkeley.voterguide.guru': 'Berkeley Voter Guide Guru'}.get(host(u), host(u))
     url_label[i_] = curly(lab)
 for nd in nodes.values():
@@ -726,7 +782,8 @@ for k in ['normal'] + list(_M):
     pal_check[k] = round(min([math.dist(L[i], L[j]) for i in range(len(L)) for j in range(i+1, len(L))] or [0]), 1)
 summary['palette'] = dict(colors=used_pal, minDeltaE=pal_check)
 out = dict(urls=urls, urlLabels=[url_label[i_] for i_ in range(len(urls))], slateOverlap=slate_overlap, summary=summary, communities=comm_meta, loose=loose_meta, ties=ties, candBc=cand_bc, races=races,
-           nodes=list(nodes.values()), edges=edges, bridges=bridges, overlap=overlap, pairTogether=pair_together,
+           nodes=list(nodes.values()), edges=edges, bridges=bridges, overlap=overlap, pairTogether=pair_together, pairTogetherConf={f'{a}|{b}': round(together_conf(a, b), 3) for i, a in enumerate(targets_core) for b in targets_core[i+1:]},
+           variants=variants_meta, borderlinePairs=borderline_pairs,
            coTargets=targets_core)
 
 # ---------- public downloads: explicit column ALLOWLIST (unknown columns are never published) ----------
@@ -757,7 +814,7 @@ pub_cand_notes = {nodes[n]['name']: ' '.join(x['text'] + (f" ({x['url']})" if x.
 type_fix = {nodes[o['id']]['name']: o['now'] for o in type_overrides}
 for f in os.listdir(args.out):
     if f != 'graph.json': os.remove(os.path.join(args.out, f))
-copied = []; published_tables = {}; zero_dropped = 0
+copied = []; published_tables = {}; zero_dropped = 0; zero_cand = zero_pamph = zero_other = 0
 for base, cols_allowed in ALLOW.items():
     p_ = os.path.join(C, base + '.csv')
     if not allowed(base + '.csv') or not os.path.exists(p_): continue
@@ -769,7 +826,11 @@ for base, cols_allowed in ALLOW.items():
         if base == 'candidates' and curly(rr.get('Candidate')) in pub_cand_notes and 'Notes' in rr: rr['Notes'] = pub_cand_notes[curly(rr['Candidate'])]
         if 'Endorser type' in rr and curly(rr.get('Endorser')) in type_fix: rr['Endorser type'] = type_fix[curly(rr['Endorser'])]
         if base == 'endorsers' and (r.get('Candidates endorsed (count)') or '').strip() in ('0', ''):
-            zero_dropped += 1; continue   # listed only as pamphlet references: not endorsers of anyone
+            zero_dropped += 1   # endorse no one in this data
+            if (r.get('Endorser type') or '') in ('Candidate', 'Slate', 'Candidate (withdrawn)'): zero_cand += 1
+            elif (r.get('Pamphlet references (count)') or '0').strip() not in ('0', ''): zero_pamph += 1
+            else: zero_other += 1
+            continue
         t_ = tuple(rr[k] for k in hk)
         if t_ in seen_r: continue   # exact duplicate rows
         seen_r.add(t_); body.append(t_)
@@ -777,7 +838,7 @@ for base, cols_allowed in ALLOW.items():
         w = csv.writer(f); w.writerow(hk); w.writerows(body)
     published_tables[base] = (hk, body)
     copied.append([base + '.csv', base + '.csv'])
-summary['nZeroEndorsersDropped'] = zero_dropped
+summary['nZeroEndorsersDropped'] = zero_dropped; summary['zeroDropped'] = dict(pamphletOnly=zero_pamph, candidates=zero_cand, other=zero_other)
 if allowed('source_snapshots.zip') and os.path.exists(os.path.join(C, 'source_snapshots.zip')):
     shutil.copyfile(os.path.join(C, 'source_snapshots.zip'), os.path.join(args.out, 'source_snapshots.zip'))
     copied.append(['source_snapshots.zip', 'Archived source snapshots (ZIP)'])
@@ -789,7 +850,7 @@ try:   # spreadsheet regenerated from the allowlisted tables only
               ('Tab', 'What it is')] + [(k.replace('_', ' ').capitalize(), f'{len(v[1])} rows; same as {k}.csv') for k, v in published_tables.items()] + [
               ('',), ('Endorsements', 'One row per endorser -> candidate or slate. Every source for each endorsement is in Edge sources.'),
               ('Slate members', 'Slate membership and nomination links. Not endorsements.'),
-              ('Endorsers', f'Everyone who endorses at least one candidate or the slate. {zero_dropped} people named only in candidate statements\' "I refer to the following residents" lists are omitted (they endorse no one in this data).'),
+              ('Endorsers', f'Everyone who endorses at least one candidate or the slate. Omitted: {zero_dropped} rows for names that endorse no one in this data ({zero_pamph} named only in candidate statements\' "I refer to the following residents" lists; {zero_cand} candidates or the slate, listed in Candidates' + (f'; {zero_other} others' if zero_other else '') + ').'),
               ('Unverified leads', 'Claims found only on aggregator sites or third-party guides. Not drawn as endorsements.'),
               ('Methodology', 'See the methodology section of the published graphic.')]
     for row in readme: ws.append(list(row))
@@ -832,8 +893,12 @@ with open(os.path.join(args.out, 'graph.json'), 'w', encoding='utf-8') as f: f.w
 # console report
 print(f"nodes={len(nodes)} edges={len(edges)} core={core.number_of_nodes()}/{core.number_of_edges()} k-dist={dict(n_comm_dist)}")
 for cm in comm_meta:
-    print(f"  bloc {cm['id']}: weakest(min over batches)={cm['weakest']['p']} pooled={cm['weakest']['pPooled']} border={cm['borderline']} exact={cm['batchesExact']}/{BATCHES} amb={[(nm(a['t']), nm(a['o']), a['p']) for a in cm['ambiguous']]} targets={[nm(t) for t in cm['targets']]} size={cm['size']}")
-print('  batch partitions agree with result:', summary['batchesAgree'], 'boot groups', summary['bootGroups'])
+    print(f"  bloc {cm['id']}: weakest(min all/conf)={cm['weakest']['p']} all={cm['weakest']['pPooled']} conf={cm['weakest']['pConf']} mean={cm['mean']}/{cm['meanConf']} border={cm['borderline']} amb={[(nm(a['t']), nm(a['o']), a['p']) for a in cm['ambiguous']]} targets={[nm(t) for t in cm['targets']]} size={cm['size']}")
+print('  pools agree:', pools_agree, 'boot groups', summary['bootGroups'])
+for k_, vp in summary['variantPartitions'].items(): print('   ', k_, vp)
+print('  refused merges:', summary['refusedMerges'])
+print('  variants:', [([nm(x) for x in v_['members']], v_['where'], v_['meanAll'], v_['meanConf']) for v_ in variants_meta])
+print('  borderline pairs:', [(nm(b_['a']), nm(b_['b']), b_['p'], b_['pConf']) for b_ in borderline_pairs])
 print('  loose:', [(nm(l['id']), [(nm(p_['t']), p_['p']) for p_ in l['partners'][:2]]) for l in loose_meta])
 print('  ties:', [(t_['a'], t_['b'], t_['max']) for t_ in ties[:8]])
 print(f'crossers {len(crossers)}/{len(multi)} single={single} palette={pal_check}')
@@ -845,3 +910,27 @@ print('bc top:', [(nm(b_['id']), b_['rankBc'], b_['topBc'], b_.get('bcLooWorst')
 import subprocess as _sp
 _sp.run([sys.executable, os.path.join(here, 'render_static.py')], check=True)
 print('static overview written')
+
+# ---------- archive copy of the bridge numbers exactly as published (analysis/bridges_v7.txt) ----------
+try:
+    _ap = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'analysis')
+    os.makedirs(_ap, exist_ok=True)
+    L_ = ['Bridge rankings as published on the site (generated by site/scripts/build-data.py; do not edit).',
+          'Ranking set: endorsers who are not candidates (plus withdrawn candidates analysed as endorsers) with 2+ endorsements; competition ranks (ties share a rank).',
+          f'Betweenness on the core network (one-candidate endorsers removed). Coalitions: average linkage at {ROBUST:.2f} on {R:,} pooled Louvain runs.', '']
+    for tag, bcv, rk, loo, looe in (('all edges', bc_core, rank_bc, bc_loo_worst, bc_loo_edge), ('without Probable edges', bc_conf, rank_bc_conf, bc_loo_worst_conf, bc_loo_edge_conf)):
+        L_.append(f'RUN: {tag}')
+        top_ = sorted([n for n in cand_bridge if bcv.get(n, 0) > 0], key=lambda n: rk[n])[:15]
+        for n in top_: L_.append(f"{rk[n]} {nm(n)} {bcv[n]:.4f} deg {D.out_degree(n)}")
+        L_.append('--- leave-one-edge-out (top 10)')
+        for n in top_:
+            if rk[n] > TOPK: continue
+            w_ = loo.get(n); e_ = looe.get(n)
+            L_.append(f"{nm(n)} | base rank {rk[n]} | worst rank after removing one edge: {w_ if w_ and w_ < 10**6 else 'unranked'}" + (f" (edge to {nm(e_[1] if e_[0] == n else e_[0])})" if e_ else ''))
+        L_.append('')
+    L_.append('Coalitions reached (rank, endorser, reach all edges / without Probable, robust)')
+    for b_ in bridges:
+        if b_['rankReach'] <= TOPK: L_.append(f"={b_['rankReach']} {nm(b_['id'])} {b_['reach']}/{b_['reachConf']} robust={b_['robustReach']}")
+    open(os.path.join(_ap, 'bridges_v7.txt'), 'w', encoding='utf-8').write('\n'.join(L_) + '\n')
+except Exception as ex_:
+    print('could not write analysis/bridges_v7.txt:', ex_)

@@ -6,11 +6,11 @@ import { createNodeBorderProgram } from '@sigma/node-border';
 import type { Data, GNode, GEdge, Bridge } from './types';
 import {
   commColor, commName, LETTERS, esc, index, bridgeSentence, listJoin, numWord, chip, nlink, typeGlyph, TYPE_ORDER, TYPE_RAMP,
-  blocName, campOf, nCamps, pct, raceShort, srcLabel, srcHref, onColor, plural, shortName, contrast, surname, robustBridges,
+  blocName, campOf, nCamps, pct, raceShort, srcLabel, srcHref, shortName, surname, robustBridges, pairPct, onColor, plural,
 } from './text';
 const isProb = (e: { conf?: string }) => /probable/i.test(e.conf || '');
 
-const LEAF = '#c4c4c4', DIM = '#eeeeee', DIM_BORDER = '#d9d9d9';
+const PROB = '#1f6fd1', LEAF = '#c4c4c4', DIM = '#eeeeee', DIM_BORDER = '#d9d9d9';
 type View = 'coalitions' | 'bridges' | 'race';
 type BMode = 'reach' | 'bc' | 'cand';
 const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector(s) as T;
@@ -20,30 +20,14 @@ const narrowMQ = window.matchMedia('(max-width: 640px)');
 const stackMQ = window.matchMedia('(max-width: 899px)');
 const hoverMQ = window.matchMedia('(hover: hover) and (pointer: fine)');
 
-// The graph is built only when needed (near the viewport, on any interaction, for a deep link, or a few seconds
-// after load), so it doesn't block the first screen.
-function whenNeeded(): Promise<void> {
-  return new Promise((res) => {
-    let done = false;
-    const go = () => { if (done) return; done = true; io.disconnect(); res(); };
-    const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) go(); }, { rootMargin: '300px 0px' });
-    if (location.hash.length > 1) { done = true; res(); return; }
-    for (const id of ['explore', 'heatmap', 'overlap']) { const el = document.getElementById(id); if (el) io.observe(el); }
-    for (const ev of ['pointerdown', 'keydown', 'wheel', 'touchstart']) window.addEventListener(ev, go, { once: true, passive: true });
-    const later = () => setTimeout(go, 6000);
-    if (document.readyState === 'complete') later(); else window.addEventListener('load', later, { once: true });
-  });
-}
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
 async function main() {
-  const dataP = fetch('data/graph.json').then((r) => r.json());
-  await whenNeeded();
-  const d: Data = await dataP;
+  const d: Data = await fetch('/data/graph.json').then((r) => r.json());
   await tick();
   const ix = index(d);
   const { byId } = ix;
-  const S = d.summary; const K = S.bootstrap.topK;
+  const S = d.summary; const K = S.bootstrap.topK; const T = S.robustThreshold;
   const edgesOut = new Map<string, GEdge[]>(); const edgesIn = new Map<string, GEdge[]>();
   const memberEdges = d.edges.filter((e) => e.kind === 'member');
   for (const e of d.edges) {
@@ -135,7 +119,7 @@ async function main() {
       const sn = byId.get(s)!, tn = byId.get(t)!;
       const active = state.hovered || state.selected;
       const isMember = attr.kind === 'member';
-      const r0 = edgeStyle(); if (attr.prob && !r.hidden) { r.color = 'rgba(150,150,150,0.45)'; r.size = Math.min(r.size ?? 1, 1); }
+      const r0 = edgeStyle(); if (attr.prob && !r.hidden) { r.color = PROB; r.size = Math.max(r.size ?? 1, 1.6); r.zIndex = 3; }
       return r0 ? r : r;
       function edgeStyle() {
       if (active) {
@@ -163,6 +147,7 @@ async function main() {
     },
   });
 
+  await tick();
   // ---------- overlay: collision-aware labels, rings, letters ----------
   const overlay = document.createElement('canvas'); overlay.className = 'overlay'; overlay.setAttribute('aria-hidden', 'true');
   container.appendChild(overlay);
@@ -197,7 +182,7 @@ async function main() {
     for (const n of cands) if (!FOCUS || FOCUS.has(n.id)) push(n.id, cn(n), true, 650);
     // every neighbour of the selected node (all of them when there are up to 40; otherwise those with 2+ links)
     nbs.sort((a, b) => (byId.get(b)!.inDeg + byId.get(b)!.outDeg) - (byId.get(a)!.inDeg + byId.get(a)!.outDeg))
-      .forEach((id) => { const n = byId.get(id)!; push(id, [shortName(n), altName(n)], nbForce || !n.leaf, 600); });
+      .forEach((id, i) => { const n = byId.get(id)!; if (nbForce || i < (narrow ? 12 : 30)) push(id, [shortName(n), altName(n)], true, 600); else if (!n.leaf) push(id, [shortName(n), altName(n)], false, 550); });
     if (state.view === 'race') {
       for (const c of raceSet()) { const n = byId.get(c)!; push(c, [shortName(n), altName(n)], true, 700); }
       if (RACE_SHARED.size <= (narrow ? 8 : 16)) [...RACE_SHARED].forEach((id) => { const n = byId.get(id)!; push(id, [shortName(n), altName(n)], false, 550); });
@@ -299,7 +284,7 @@ async function main() {
     container.style.cursor = 'pointer';
   });
   renderer.on('leaveNode', () => { if (!state.hovered) return; state.hovered = null; recompute(); renderer.refresh({ skipIndexation: true }); hideTip(); container.style.cursor = ''; });
-  renderer.on('clickNode', ({ node }) => { hideTip(); state.hovered = null; select(node, false); });
+  renderer.on('clickNode', ({ node }) => { hideTip(); state.hovered = null; select(node, stackMQ.matches); });
   renderer.on('clickStage', () => { hideTip(); if (state.selected) select(null); });
   container.addEventListener('touchstart', hideTip, { passive: true });
 
@@ -347,21 +332,20 @@ async function main() {
       const LIM = 12;
       const rows = list.map((e, i) => edgeRow(e, e.s, true, oneDate).replace('<li>', i >= LIM ? '<li class="more" hidden>' : '<li>')).join('');
       const more = list.length > LIM ? `<button class="showmore">Show ${list.length - LIM} more</button>` : '';
-      return `<h5>${typeGlyph(t)}${esc(t)} <span class="cnt">${list.length}</span></h5><ul class="elist">${rows}</ul>${more}`;
+      return `<h4>${typeGlyph(t)}${esc(t)} <span class="cnt">${list.length}</span></h4><ul class="elist">${rows}</ul>${more}`;
     }).join('');
   }
   function placement(n: GNode) {
     if (isCand(n)) {
-      if (n.community >= 0) { const c = d.communities[n.community]; return `${chip(n.community)} In coalition <strong>${esc(LETTERS[c.id])} (${esc(blocName(ix, c))})</strong>: every pair of its candidates is grouped together in at least ${pct(c.weakest.p)} of runs in every batch${c.borderline ? ' (borderline)' : ''}.`; }
+      if (n.community >= 0) { const c = d.communities[n.community]; return `${chip(n.community)} In coalition <strong>${esc(LETTERS[c.id])} (${esc(blocName(ix, c))})</strong>: its candidates land together in ${pairPct(c.mean, c.meanConf, T)} of runs${c.borderline ? ' (borderline)' : ''}.`; }
       const l = d.loose.find((x) => x.id === n.id);
       if (l) {
-        const top = l.partners.filter((p) => Math.abs(p.p - l.best) <= 0.01);
-        return `${chip(-1)} In no coalition. ${l.best >= S.robustThreshold - (S.border ?? 0.05) ? `Grouped most often with ${listJoin(l.partners.filter((p) => p.p >= S.robustThreshold - (S.border ?? 0.05)).map((p) => `${esc(N(p.t).name)} (${pct(p.p)} of runs)`))}, but not consistently across batches.` : `Not grouped with any candidate in more than ${pct(l.best)} of runs${top.length ? ` (${listJoin(top.map((p) => esc(N(p.t).name)))})` : ''}.`}`;
+        return `${chip(-1)} In no coalition. Lands most often with ${listJoin(l.partners.slice(0, 3).map((p) => `${esc(N(p.t).name)} (${pairPct(p.p, p.pConf, T)})`))}.${l.groupedIn.length ? ` Joins ${listJoin(l.groupedIn.map((v) => listJoin(v.members.filter((x) => x !== n.id).map((x) => esc(surname(N(x)))))))} in some checks, but not all.` : ''}`;
       }
-      return `${chip(-1)} Not grouped: no endorsements recorded.`;
+      return n.memberOf ? `${chip(n.community)} No endorsers of their own; placed by the slate link${n.community >= 0 ? ` (coalition ${LETTERS[n.community]})` : ''}.` : `${chip(-1)} No endorsements recorded.`;
     }
     if (n.leaf) return `${chip(n.community)} Backs one candidate only${n.community >= 0 ? `, in coalition ${LETTERS[n.community]}` : ''}.`;
-    if (n.community >= 0 && !n.isTarget || (n.analysisEndorser && n.community >= 0)) return `${chip(n.community)} Grouped with coalition <strong>${LETTERS[n.community]} (${esc(blocName(ix, d.communities[n.community]))})</strong> in ${pct(n.blocScore ?? 0)} of runs, on average.`;
+    if (n.community >= 0 && !n.isTarget || (n.analysisEndorser && n.community >= 0)) return `${chip(n.community)} Lands with coalition <strong>${LETTERS[n.community]} (${esc(blocName(ix, d.communities[n.community]))})</strong> in ${pct(n.blocScore ?? 0)} of runs, on average.`;
     return `${chip(-1)} In no coalition${n.blocScore ? ` (closest: ${pct(n.blocScore)} of runs)` : ''}.`;
   }
   function bridgeMetrics(n: GNode) {
@@ -381,12 +365,14 @@ async function main() {
     const oneDate = panelDates([...outs, ...ins, ...struct]);
     const tkey = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
     const titles: string[] = [];
-    for (const t of [n.title, ...outs.map((e) => e.title)].filter(Boolean)) if (!titles.some((x) => tkey(x) === tkey(t))) titles.push(t);
+    const words = (t: string) => tkey(t).split(' ');
+    const covered = (t: string) => titles.some((x) => { const kw = new Set(words(x)); const w = words(t); return w.filter((y) => kw.has(y)).length >= 0.75 * w.length; });
+    for (const t of [n.title, ...outs.map((e) => e.title)].filter(Boolean)) if (!covered(t)) titles.push(t);
     const sentence = outs.length ? `<p class="sentence">${bridgeSentence(ix, d, id)}</p>` : '';
     const notes = (n.notes || []).map((x) => (x.url ? `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.text)}</a>` : esc(x.text))).join(' ');
     let html = `<button class="back" data-back>← Back to ${state.view === 'race' ? 'race view' : state.view}</button>
       <div class="ncard"><p class="ntype">${typeGlyph(n.type)}${esc(n.type)}${n.race ? ` · ${esc(n.race)}` : ''}</p>
-      <h3 tabindex="-1" id="ntitle">${esc(n.name)}</h3>
+      <h2 tabindex="-1" id="ntitle">${esc(n.name)}</h2>
       ${n.typeNote ? `<p class="muted small">${esc(n.typeNote)}</p>` : ''}${notes ? `<p class="small">${notes}</p>` : ''}
       ${titles.length ? `<p class="ttl-main">${titles.slice(0, 2).map(esc).join(' · ')}</p>` : ''}
       <p class="meta">${placement(n)}</p>
@@ -399,9 +385,9 @@ async function main() {
       ['Members', memberEdges.filter((e) => e.t === id && isMem(e)), 's'], ['Nominated by', memberEdges.filter((e) => e.t === id && !isMem(e)), 's'],
       ['Member of', memberEdges.filter((e) => e.s === id && isMem(e)), 't'], ['Nominated', memberEdges.filter((e) => e.s === id && !isMem(e)), 't'],
     ];
-    for (const [h, es, side] of groups) if (es.length) html += `<h4>${h} <span class="cnt">${es.length}</span> <span class="small muted nt">not an endorsement</span></h4>${edgeList(es, (e) => (side === 's' ? e.s : e.t), false, oneDate)}`;
-    if (outs.length) html += `<h4>Endorses <span class="cnt">${outs.length}</span>${pOut ? ` <span class="small muted nt">${pOut} probable</span>` : ''}</h4>${edgeList(outs, (e) => e.t, false, oneDate)}`;
-    if (ins.length) html += `<h4>Endorsed by <span class="cnt">${ins.length}</span>${pIn ? ` <span class="small muted nt">${pIn} probable</span>` : ''}</h4>${groupedIn(id, oneDate)}`;
+    for (const [h, es, side] of groups) if (es.length) html += `<h3>${h} <span class="cnt">${es.length}</span> <span class="small muted nt">not an endorsement</span></h3>${edgeList(es, (e) => (side === 's' ? e.s : e.t), false, oneDate)}`;
+    if (outs.length) html += `<h3>Endorses <span class="cnt">${outs.length}</span>${pOut ? ` <span class="small muted nt">${pOut} probable</span>` : ''}</h3>${edgeList(outs, (e) => e.t, false, oneDate)}`;
+    if (ins.length) html += `<h3>Endorsed by <span class="cnt">${ins.length}</span>${pIn ? ` <span class="small muted nt">${pIn} probable</span>` : ''}</h3>${groupedIn(id, oneDate)}`;
     if (n.isTarget && !ins.length) html += `<p class="muted">No endorsements recorded for this candidate.</p>`;
     return html;
   }
@@ -412,18 +398,16 @@ async function main() {
       for (let i = 0; i < c.targets.length; i++) for (let j = i + 1; j < c.targets.length; j++) pairs.push(`<li>${esc(shortName(N(c.targets[i])))} & ${esc(shortName(N(c.targets[j])))}: <strong>${pct(ix.together(c.targets[i], c.targets[j]))}</strong></li>`);
       return `<li class="coal"><div class="coal-h">${chip(c.id)}<strong>${esc(blocName(ix, c))}</strong></div>
         <p class="coal-c">${c.targets.map((t) => `${nlink(N(t))} <span class="race-tag">${esc(raceShort(N(t).race))}</span>`).join(', ')}</p>
-        <p class="small">Every pair grouped together in at least <strong>${pct(c.weakest.p)}</strong> of runs in every batch${c.borderline ? ' — <strong>borderline</strong>' : ''} (weakest: ${esc(shortName(N(c.weakest.a)))} & ${esc(shortName(N(c.weakest.b)))}).${(() => { const o = [...new Set(c.ambiguous.filter((a) => !N(a.o).memberOf).map((a) => a.o))].filter((x) => c.ambiguous.filter((a) => a.o === x).length >= c.targets.length); return o.length ? ` ${listJoin(o.map((x) => esc(N(x).name)))} ${o.length > 1 ? 'are' : 'is'} also grouped with every member in ${pct(Math.min(...c.ambiguous.filter((a) => o.includes(a.o)).map((a) => a.p)))}+ of runs, so the edge of this group is not settled.` : ''; })()}</p>
+        <p class="small">Together in ${pairPct(c.mean, c.meanConf, T)} of runs${c.borderline ? `. <strong>Borderline</strong>: ${esc(shortName(N(c.weakest.a)))} & ${esc(shortName(N(c.weakest.b)))} ${pct(c.weakest.p)}` : ''}.</p>
         ${pairs.length > 1 ? `<details class="pairs"><summary>All ${pairs.length} pairs</summary><ul>${pairs.join('')}</ul></details>` : ''}
-        ${Object.keys(c.typeCounts).length ? `${typeBar(c.typeCounts)}<p class="small muted">${c.size - c.targets.length} endorsers colored with this coalition</p>` : ''}</li>`;
+        ${Object.keys(c.typeCounts).length ? typeBar(c.typeCounts) : ''}</li>`;
     }).join('');
-    const BD = S.robustThreshold - (S.border ?? 0.05);
-    const loose = d.loose.map((l) => { const top = l.partners.filter((p) => p.p >= BD || Math.abs(p.p - l.best) <= 0.01).slice(0, 3);
-      return `<li>${nlink(N(l.id), undefined, 'strong')} <span class="race-tag">${esc(raceShort(N(l.id).race))}</span><br><span class="small">${l.best >= BD ? `With ${listJoin(top.map((p) => `${esc(shortName(N(p.t)))} (${pct(p.p)})`))}, not consistently` : `No partner above ${pct(l.best)} of runs`}</span></li>`; }).join('');
+    const loose = d.loose.map((l) => `<li>${nlink(N(l.id), undefined, 'strong')} <span class="race-tag">${esc(raceShort(N(l.id).race))}</span><br><span class="small">Closest: ${listJoin(l.partners.slice(0, 2).map((p) => `${esc(shortName(N(p.t)))} (${pairPct(p.p, p.pConf, T)})`))}</span></li>`).join('');
     const allTypes = [...new Set(d.communities.flatMap((c) => Object.keys(c.typeCounts)))];
-    return `<h3 class="ph">${numWord(S.nBlocs).replace(/^./, (x) => x.toUpperCase())} ${plural(S.nBlocs, 'coalition')}</h3>
-      <p class="pintro">A coalition is a group of candidates that every one of ${numWord(S.batches)} independent batches of ${S.runs.toLocaleString('en-US')} clustering runs keeps together, with every pair in the same cluster in at least ${pct(S.robustThreshold)} of runs. Dark lines are endorsements that leave the endorser’s coalition; lighter lines are “probable” endorsements. Click a name for its endorsers and sources.</p>
+    return `<h2 class="ph">${numWord(S.nBlocs).replace(/^./, (x) => x.toUpperCase())} ${plural(S.nBlocs, 'coalition')}</h2>
+      <p class="pintro">Candidates who land in the same cluster in at least ${pct(T)} of ${S.nRuns.toLocaleString('en-US')} runs. Bars show their endorsers by type.</p>
       <ol class="coals">${items}</ol>${typeKey(allTypes)}
-      <h4>Unattached <span class="cnt">${d.loose.length}</span></h4><p class="small muted">In no coalition (white dots).</p><ul class="loose">${loose}</ul>`;
+      <h3>No coalition <span class="cnt">${d.loose.length + isolated.length}</span></h3><ul class="loose">${loose}${isolated.map((n) => `<li>${nlink(n, undefined, 'strong')} <span class="race-tag">${esc(raceShort(n.race))}</span><br><span class="small">No endorsements recorded</span></li>`).join('')}</ul>`;
   }
 
   function stackBar(b: Bridge) {
@@ -455,11 +439,11 @@ async function main() {
       const ok = list.filter(sure), un = list.filter((b) => !sure(b));
       rows = `${ok.length ? `<li class="sub">Hold up under resampling <span class="cnt">${ok.length}</span></li>${ok.map(row).join('')}` : ''}${un.length ? `<li class="sub">Less certain <span class="cnt">${un.length}</span></li>${un.map(row).join('')}` : ''}`;
     }
-    const expl = mode === 'cand' ? '<p class="small">Candidates score high on betweenness mainly because all their endorsers connect through them. Shown for reference only; ranks, not scores, because the differences are small.</p>'
-      : mode === 'reach' ? `<p class="small"><strong>Coalitions reached</strong>: how many of the ${numWord(nCamps(d))} coalitions an endorser’s picks land in (unattached candidates don’t count). Equal counts share a rank. Each bar shows the endorser’s picks, colored by coalition; white segments are unattached candidates.</p>`
-        : '<p class="small"><strong>Betweenness</strong>: trace the shortest chain of endorsements between every pair of actors; how often does it pass through this endorser? Bars show relative size; ranks, not scores, because the differences are small.</p>';
-    return `<h3 class="ph">Who spans the coalitions</h3>
-      <p class="pintro">People and groups (not candidates) who back at least two candidates. “Holds up” means the endorser stays in the top ${K} in at least ${pct(S.bootstrap.robustShare)} of ${S.bootstrap.resamples} re-runs (each dropping ${pct(S.bootstrap.dropShare)} of endorsements and redoing the clustering) and after removing any single endorsement.</p>
+    const expl = mode === 'cand' ? '<p class="small">Candidates score high because all their endorsers connect through them.</p>'
+      : mode === 'reach' ? `<p class="small">How many of the ${numWord(nCamps(d))} coalitions an endorser’s picks land in. Ties share a rank. Bars: picks by coalition; white = no coalition.</p>`
+        : '<p class="small">How often an endorser lies on the shortest chain of endorsements between two others.</p>';
+    return `<h2 class="ph">Who spans the coalitions</h2>
+      <p class="pintro">“Holds up”: stays in the top ${K} when endorsements are deleted at random, one at a time, or when the probable ones are left out.</p>
       <div class="seg" role="group" aria-label="Ranking"><button data-bsort="reach" aria-pressed="${mode === 'reach'}">Coalitions reached</button><button data-bsort="bc" aria-pressed="${mode === 'bc'}">Betweenness</button><button data-bsort="cand" aria-pressed="${mode === 'cand'}">Candidates</button></div>
       ${expl}<ol class="bridges">${rows}</ol>`;
   }
@@ -491,13 +475,13 @@ async function main() {
         const U = endSet(u.ids);
         const rows = council.map((c) => { const C = endSet([c.id]); const sh = [...U].filter((x) => C.has(x)).length; const p = Math.max(...u.ids.map((i) => ix.together(i, c.id))); return { c, sh, p }; })
           .filter((x) => x.sh > 0).sort((a, b) => b.p - a.p || b.sh - a.sh).slice(0, 6);
-        return `<h5>${esc(u.label)}</h5><table class="mini"><thead><tr><th scope="col">Council candidate</th><th scope="col" class="num">Shared endorsers</th><th scope="col" class="num">Grouped together</th></tr></thead><tbody>${rows.map((x) => `<tr><td>${nlink(x.c)} <span class="race-tag">${esc(raceShort(x.c.race))}</span></td><td class="num">${x.sh}</td><td class="num">${pct(x.p)}</td></tr>`).join('')}</tbody></table>`;
+        return `<h4>${esc(u.label)}</h4><table class="mini"><thead><tr><th scope="col">Council candidate</th><th scope="col" class="num">Shared endorsers</th><th scope="col" class="num">Together</th></tr></thead><tbody>${rows.map((x) => `<tr><td>${nlink(x.c)} <span class="race-tag">${esc(raceShort(x.c.race))}</span></td><td class="num">${x.sh}</td><td class="num">${pct(x.p)}</td></tr>`).join('')}</tbody></table>`;
       }).join('');
-      rbc = `<h4>Shared with council candidates</h4><p class="small muted">“Grouped together” is the highest share of ${S.nRuns.toLocaleString("en-US")} runs in which the unit and the council candidate share a cluster.</p>${rbc}`;
+      rbc = `<h3>Shared with council candidates</h3><p class="small muted">Together: share of runs in the same cluster.</p>${rbc}`;
     }
-    return `<h3 class="ph">Compare a race</h3><div class="seg wrap" role="group" aria-label="Race">${opts}</div>
+    return `<h2 class="ph">Compare a race</h2><div class="seg wrap" role="group" aria-label="Race">${opts}</div>
       <ul class="rcs">${cards}</ul>${typeKey([...types])}${rbc}
-      <h4>Endorsers shared within the race <span class="cnt">${shared.length}</span></h4>${sharedHtml}`;
+      <h3>Endorsers shared within the race <span class="cnt">${shared.length}</span></h3>${sharedHtml}`;
   }
 
   function renderPanel() {
@@ -510,24 +494,23 @@ async function main() {
     const items = state.colorBy === 'community'
       ? d.communities.map((c) => `<li>${chip(c.id)}<span>${esc(blocName(ix, c))}</span></li>`).join('') + `<li><span class="dot none"></span><span>No coalition</span></li>`
       : TYPE_ORDER.filter((t) => d.nodes.some((n) => n.type === t)).map((t) => `<li><span class="dot" style="background:${TYPE_RAMP[t]}"></span><span>${esc(t)}</span></li>`).join('');
-    const ring = state.view === 'coalitions' ? 'ringed and numbered: endorsers who span the most coalitions (as in the overview)' : state.view === 'bridges' ? `ringed and numbered: top ${narrowMQ.matches ? 5 : K} by ${state.bmode === 'reach' ? 'coalitions reached' : state.bmode === 'bc' ? 'betweenness' : 'candidate betweenness'} (number = rank)` : 'ringed: endorsers shared by 2+ candidates in this race';
-    L.innerHTML = `<ul>${items}<li><span class="dot" style="background:${LEAF}"></span><span>backs one candidate${state.showAll ? '' : ' (faded)'}</span></li></ul>
-      <p>${narrowMQ.matches ? `<span class="lline"></span>endorsement <span class="lline dark"></span>leaves its coalition <span class="lline prob"></span>probable${memberEdges.length ? ' <span class="lline mem"></span>slate link' : ''} · <span class="ringk"></span>${state.view === 'race' ? 'shared endorser' : 'numbered: spans most coalitions'}` : `<span class="lline"></span>endorsement <span class="lline dark"></span>leaves the endorser’s coalition <span class="lline prob"></span>probable endorsement (lighter) ${memberEdges.length ? '<span class="lline mem"></span>slate membership (not an endorsement)' : ''} · <span class="ringk"></span>${ring} · dot size: endorsements (log scale)`}</p>`;
+    const ring = state.view === 'race' ? 'endorser shared within the race' : state.view === 'bridges' ? `top ${narrowMQ.matches ? 5 : K} (number = rank)` : 'spans the most coalitions';
+    L.innerHTML = `<ul>${items}<li><span class="dot" style="background:${LEAF}"></span><span>backs one candidate</span></li></ul>
+      <p><span class="lline"></span>endorsement <span class="lline dark"></span>crosses coalitions <span class="lline prob"></span>probable${memberEdges.length ? ' <span class="lline mem"></span>slate link' : ''} <span class="ringk"></span>${ring}</p>`;
   }
-  function renderTray() {
-    const t = $('#tray');
-    t.innerHTML = isolated.length ? `<strong>No endorsements recorded:</strong> ${isolated.map((n) => `${nlink(n)}${n.race ? ` <span class="race-tag">${esc(n.race)}</span>` : ''}`).join(', ')}` : '';
-    t.hidden = !isolated.length;
+  // ---------- bottom sheet (narrow screens) ----------
+  const sheet = $('#sheet'); const handle = $<HTMLButtonElement>('#sheetbtn');
+  function setSheet(open: boolean) {
+    sheet.classList.toggle('open', open); document.body.classList.toggle('sheet-open', open); handle.setAttribute('aria-expanded', String(open));
+    handle.querySelector('span')!.textContent = open ? 'Hide details' : state.selected ? `Details: ${N(state.selected).name}` : 'Coalitions, bridges and races';
   }
-
-  let panelVisible = false;
-  function updatePill() { $('#pill').hidden = !(state.selected && stackMQ.matches && !panelVisible); }
-  new IntersectionObserver((es) => { panelVisible = es.some((e) => e.isIntersecting); updatePill(); }, { rootMargin: '0px 0px -45% 0px' }).observe(panel);
+  handle.addEventListener('click', () => setSheet(!sheet.classList.contains('open')));
+  function updatePill() { if (stackMQ.matches) setSheet(sheet.classList.contains('open') || !!state.selected); }
   // ---------- interactions ----------
   function select(id: string | null, fly = true) {
     const had = state.selected;
     state.selected = id; recompute(); renderer.refresh({ skipIndexation: true }); renderPanel(); syncHash();
-    if (id && fly) flyTo(id);
+    if (id && fly) { if (stackMQ.matches) setTimeout(() => flyTo(id), 260); else flyTo(id); }
     if (!id && had) goHome();
   }
   const tabs = [...document.querySelectorAll<HTMLButtonElement>('[role=tab]')];
@@ -546,13 +529,11 @@ async function main() {
       if (j >= 0) { ev.preventDefault(); tabs[j].focus(); tabs[j].click(); }
     });
   });
-  $('#pill').addEventListener('click', () => { panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); ($('#ntitle') as HTMLElement | null)?.focus({ preventScroll: true }); });
   document.addEventListener('click', (ev) => {
     const t = ev.target as HTMLElement;
     const nb = t.closest<HTMLElement>('[data-node]');
     if (nb) {
       ev.preventDefault(); const id = nb.dataset.node!;
-      if (!panel.contains(nb) && !$('#explore').contains(nb)) $('#explore').scrollIntoView({ behavior: 'smooth' });
       select(id); return;
     }
     if (t.closest('[data-back]')) { select(null); return; }
@@ -602,12 +583,12 @@ async function main() {
     if (state.view === 'race' && state.race !== 'Rent Board') p.set('race', state.race);
     if (state.view === 'bridges' && state.bmode !== 'reach') p.set('rank', state.bmode);
     if (state.selected) p.set('node', state.selected);
-    const h = p.toString(); const want = h ? '#' + h : '';
-    if (location.hash !== want) history.replaceState(null, '', want || location.pathname + location.search);
+    const h = p.toString(); const want = location.pathname + (h ? '?' + h : '');
+    if (location.pathname + location.search + location.hash !== want) history.replaceState(null, '', want);
   }
   function applyHash() {
     applying = true;
-    const hp = new URLSearchParams(location.hash.slice(1));
+    const hp = new URLSearchParams(location.search.slice(1) || location.hash.slice(1));
     const v = hp.get('view'); const race = hp.get('race'); const rank = hp.get('rank');
     if (race && d.races.some((r) => r.race === race)) state.race = race;
     if (rank && ['reach', 'bc', 'cand'].includes(rank)) state.bmode = rank as BMode;
@@ -616,116 +597,19 @@ async function main() {
     if (node && byId.has(node)) select(node, true);
     applying = false;
   }
-  window.addEventListener('hashchange', applyHash);
+  window.addEventListener('popstate', applyHash);
 
-  renderTray(); applyHash(); recompute(); renderPanel(); renderLegend(); renderer.refresh();
-  await tick(); renderHeatmap(d); await tick(); renderOverlap(d);
+  ($('#legendbox') as HTMLDetailsElement).open = !narrowMQ.matches;
+  await tick(); applyHash();
   (window as any).__test = {
     pos: (id: string) => { const dd: any = renderer.getNodeDisplayData(id); return dd ? renderer.framedGraphToViewport({ x: dd.x, y: dd.y }) : null; },
     byName: (n: string) => ix.byName.get(n)?.id, state,
     cands: () => d.nodes.filter((n) => n.isTarget && g.hasNode(n.id)).map((n) => n.id),
+    leaf: (id: string) => !!byId.get(id)?.leaf,
     nbrs: () => (state.selected && g.hasNode(state.selected) ? g.neighbors(state.selected) : []),
   };
   (window as any).__ready = true;
 }
 
-// ---------- co-assignment heatmap (real table) ----------
-function heat(v: number) {   // returns hex so contrast() can read it
-  const h = 222 / 360, sat = (35 + v * 35) / 100, l = (98 - v * 74) / 100;
-  const q = l < 0.5 ? l * (1 + sat) : l + sat - l * sat, p = 2 * l - q;
-  const f = (t: number) => { t = (t + 1) % 1; const c = t < 1 / 6 ? p + (q - p) * 6 * t : t < 1 / 2 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p; return Math.round(c * 255).toString(16).padStart(2, '0'); };
-  return `#${f(h + 1 / 3)}${f(h)}${f(h - 1 / 3)}`;
-}
-function renderHeatmap(d: Data) {
-  const ix = index(d);
-  const order = [...d.communities.flatMap((c) => c.targets), ...d.loose.map((l) => l.id)];
-  const ids = order.filter((id, i) => order.indexOf(id) === i);
-  const N = (id: string) => ix.byId.get(id)!;
-  const lab = (id: string) => { const n = N(id); return n.type === 'Slate' ? 'Slate page' : surname(n); };
-  let h = `<table class="hm"><caption class="sr">Share of ${d.summary.nRuns.toLocaleString("en-US")} clustering runs in which each pair of candidates is grouped together</caption><thead><tr><td></td>${ids.map((id) => `<th scope="col"><span>${chip(N(id).community)} ${esc(lab(id))}</span></th>`).join('')}</tr></thead><tbody>`;
-  for (const a of ids) {
-    h += `<tr><th scope="row">${chip(N(a).community)} ${esc(lab(a))}${N(a).memberOf ? '<sup aria-label="slate member">s</sup>' : ''} <small>${esc(raceShort(N(a).race))}</small></th>`;
-    for (const b of ids) {
-      const ca = N(a).community, cb = N(b).community;
-      const same = ca >= 0 && ca === cb;
-      if (a === b) { h += `<td class="diag${same ? ' blk' : ''}" ${same ? `style="--bc:${commColor(ca)}"` : ''}><span class="sr">same candidate</span></td>`; continue; }
-      const v = ix.together(a, b); const bg = heat(v); const fg = contrast('#ffffff', bg) >= contrast('#000000', bg) ? '#fff' : '#000';
-      h += `<td class="${same ? 'blk' : ''}" style="background:${bg};color:${fg};${same ? `--bc:${commColor(ca)}` : ''}" title="${esc(N(a).name)} & ${esc(N(b).name)}: together in ${pct(v)} of runs">${v > 0 && v < 0.005 ? '&lt;1' : Math.round(v * 100)}</td>`;
-    }
-    h += '</tr>';
-  }
-  h += '</tbody></table>';
-  const hm = document.getElementById('heatmap')!;
-  hm.innerHTML = h;
-  hm.tabIndex = 0; hm.setAttribute('role', 'region'); hm.setAttribute('aria-label', 'Co-assignment table; scroll sideways to see every column');
-}
-
-// ---------- normalized overlap matrix (real table, lower triangle) ----------
-function renderOverlap(d: Data) {
-  const ix = index(d); const N = (id: string) => ix.byId.get(id)!;
-  const memberSet = new Set(ix.slateMembers);
-  const order = [...d.communities.flatMap((c) => c.targets), ...d.loose.map((l) => l.id)];
-  const ids = order.filter((id, i) => order.indexOf(id) === i && !memberSet.has(id) && N(id).inDeg > 0);
-  const ov = new Map<string, Data['overlap'][number]>();
-  for (const o of d.overlap) { ov.set(o.a + '|' + o.b, o); ov.set(o.b + '|' + o.a, o); }
-  const el = document.getElementById('overlap')!;
-  let metric: 'j' | 'oc' | 'n' = 'j';
-  const draw = () => {
-    const vals = d.overlap.filter((o) => ids.includes(o.a) && ids.includes(o.b)).map((o) => o[metric]);
-    const max = Math.max(...vals, 1e-9);
-    const fmt = (o: Data['overlap'][number]) => (metric === 'n' ? String(o.n) : o[metric] > 0 && o[metric] < 0.005 ? '<1' : String(Math.round(o[metric] * 100)));
-    const lab = (id: string) => (N(id).type === 'Slate' ? 'Right to Housing slate' : shortName(N(id)));
-    let h = `<table class="ovt"><caption class="sr">Endorser overlap between candidates (${metric === 'j' ? 'Jaccard similarity, percent' : metric === 'oc' ? 'shared endorsers as a percent of the smaller list' : 'number of shared endorsers'})</caption><thead><tr><td></td>${ids.slice(0, -1).map((id) => `<th scope="col"><span>${esc(lab(id))}</span></th>`).join('')}</tr></thead><tbody>`;
-    ids.forEach((a, i) => {
-      if (i === 0) return;
-      h += `<tr><th scope="row">${chip(N(a).community)} ${esc(lab(a))} <small>${esc(raceShort(N(a).race))}</small></th>`;
-      ids.slice(0, -1).forEach((b, j) => {
-        if (j >= i) { h += '<td class="void"></td>'; return; }
-        const o = ov.get(a + '|' + b);
-        if (!o) { h += '<td class="zero"><span class="sr">none</span></td>'; return; }
-        const t = Math.sqrt(o[metric] / max); const bg = heat(t); const fg = contrast('#ffffff', bg) >= contrast('#000000', bg) ? '#fff' : '#000';
-        h += `<td tabindex="0" data-a="${esc(a)}" data-b="${esc(b)}" style="background:${bg};color:${fg}">${esc(fmt(o))}</td>`;
-      });
-      h += '</tr>';
-    });
-    h += '</tbody></table>';
-    el.querySelector('.ovwrap')!.innerHTML = h;
-    const w = el.querySelector<HTMLElement>('.ovwrap')!; w.tabIndex = 0; w.setAttribute('role', 'region'); w.setAttribute('aria-label', 'Endorser overlap table; scroll sideways to see every column');
-  };
-  el.innerHTML = `<div id="ovtip" class="ovtip" role="status" hidden></div><div class="seg" role="group" aria-label="Overlap measure"><button data-m="j" aria-pressed="true">Jaccard (% of combined lists)</button><button data-m="oc" aria-pressed="false">% of smaller list</button><button data-m="n" aria-pressed="false">Raw count</button></div><div class="ovwrap"></div>`;
-  draw();
-  const tip = document.getElementById('ovtip')!;
-  let cur: HTMLElement | null = null;
-  const hide = () => { tip.hidden = true; cur = null; };
-  const show = (cell: HTMLElement) => {
-    const a = cell.dataset.a!, b = cell.dataset.b!; const o = ov.get(a + '|' + b); if (!o) { hide(); return; }
-    cur = cell;
-    const names = o.shared.map((s) => N(s).name);
-    const sheet = window.matchMedia('(max-width: 640px)').matches;
-    tip.classList.toggle('sheet', sheet);
-    tip.innerHTML = `<button class="ovx" aria-label="Close">×</button><strong>${esc(N(a).name)} & ${esc(N(b).name)}</strong><br>${o.n} shared ${plural(o.n, 'endorser')} · ${pct(o.j)} of combined lists · ${pct(o.oc)} of the smaller list<br>${esc(listJoin(names.slice(0, 14)))}${names.length > 14 ? ` and ${names.length - 14} more` : ''}`;
-    if (!sheet) {
-      const r = cell.getBoundingClientRect(), pr = el.getBoundingClientRect();
-      tip.style.left = Math.max(0, Math.min(r.left - pr.left, el.clientWidth - 310)) + 'px'; tip.style.top = r.bottom - pr.top + 6 + 'px';
-    } else { tip.style.left = ''; tip.style.top = ''; }
-    tip.hidden = false;
-  };
-  el.addEventListener('click', (e) => {
-    const t = e.target as HTMLElement;
-    if (t.closest('.ovx')) { hide(); return; }
-    const b = t.closest<HTMLElement>('[data-m]');
-    if (b) { metric = b.dataset.m as any; el.querySelectorAll('[data-m]').forEach((x) => x.setAttribute('aria-pressed', String(x === b))); hide(); draw(); return; }
-    const c = t.closest<HTMLElement>('td[data-a]');
-    if (c) { if (wasOpen === c && !hoverMQ.matches) hide(); else show(c); }
-    wasOpen = null;
-  });
-  let wasOpen: HTMLElement | null = null;   // a second tap on the same cell closes it (focus fires before click, so look at pointerdown)
-  el.addEventListener('pointerdown', (e) => { const c = (e.target as HTMLElement).closest<HTMLElement>('td[data-a]'); wasOpen = c && cur === c && !tip.hidden ? c : null; });
-  document.addEventListener('click', (e) => { if (!el.contains(e.target as Node)) hide(); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hide(); });
-  el.addEventListener('mouseover', (e) => { if (!hoverMQ.matches) return; const c = (e.target as HTMLElement).closest<HTMLElement>('td[data-a]'); if (c) show(c); });
-  el.addEventListener('focusin', (e) => { const c = (e.target as HTMLElement).closest<HTMLElement>('td[data-a]'); if (c) show(c); });
-  el.addEventListener('mouseleave', () => { if (hoverMQ.matches) hide(); });
-}
 
 main().catch((err) => { console.error(err); const p = document.getElementById('panel'); if (p) p.innerHTML = '<p>Could not load the graphic data.</p>'; });

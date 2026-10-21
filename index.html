@@ -2,90 +2,53 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>%TITLE%</title>
 <meta name="description" content="%DESC%" />
-<meta property="og:title" content="Who bridges Berkeley’s endorsement camps?" />
+<meta property="og:title" content="Who backs whom in Berkeley’s November 2026 election" />
 <meta property="og:description" content="%DESC%" />
-<meta property="og:type" content="article" />
+<meta property="og:type" content="website" />
 <meta name="theme-color" content="#ffffff" />
-<link rel="preload" href="/fonts/source-serif-4-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
 <link rel="preload" href="/fonts/libre-franklin-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
 <link rel="preload" href="/data/graph.json" as="fetch" crossorigin />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='9' cy='10' r='5' fill='%23E69F00'/%3E%3Ccircle cx='23' cy='10' r='5' fill='%23332288'/%3E%3Ccircle cx='16' cy='23' r='5' fill='%2344AA99'/%3E%3Cpath d='M9 10L23 10L16 23Z' stroke='%23222' fill='none' stroke-width='1.5'/%3E%3C/svg%3E" />
 </head>
-<body>
-<a class="skip" href="#explore">Skip to the interactive graphic</a>
-<header class="masthead"><div class="wrap"><span class="kicker">The Daily Californian &middot; Election 2026 &middot; Data</span></div></header>
-<main>
-<article class="story wrap">
-  <p class="eyebrow">Berkeley endorsements, November 2026</p>
-  <h1><!--HEADLINE--></h1>
-  <p class="dek"><!--DEK--></p>
-  <p class="jump"><a href="#explore">Jump to the interactive graph ↓</a></p>
-</article>
-<figure class="overview wrap-wide" aria-labelledby="ov-cap">
-  <div class="ov-art" role="img" aria-labelledby="ov-alt">
-    <div class="svg-wide"><!--OVERVIEW_WIDE--></div>
-    <div class="svg-narrow"><!--OVERVIEW_NARROW--></div>
+<body class="app">
+<a class="skip" href="#q">Skip to search</a>
+<header class="appbar">
+  <div class="ab-row">
+    <h1 class="apptitle"><span class="kick">Daily Cal · Election 2026</span> Who backs whom in Berkeley</h1>
+    <a class="storylink" href="/findings/">Findings &amp; methods →</a>
   </div>
-  <figcaption id="ov-cap" class="ov-key"><p class="ov-title">The core of the network</p><!--OVERVIEW_KEY--></figcaption>
-  <p id="ov-alt" class="sr"><!--OVERVIEW_ALT--></p>
-</figure>
-<div class="story wrap">
-  <p class="stats"><!--STATS--></p>
-  <section class="findings" aria-labelledby="kf"><h2 id="kf">What the network shows</h2><ol><!--FINDINGS--></ol></section>
-  <p class="howto">Each dot is a candidate, person or organization; a line means one endorsed the other. Dots are placed by a force-directed layout, so actors who share endorsements sit near each other. Click a dot or search for a name to see its connections and sources.</p>
-</div>
-
-<section id="explore" class="explore" aria-label="Interactive endorsement network">
-  <div class="toolbar wrap-wide">
-    <div class="tabs" role="tablist" aria-label="View">
-      <button role="tab" id="tab-coalitions" aria-selected="true" aria-controls="panel" tabindex="0" data-view="coalitions">Coalitions</button>
-      <button role="tab" id="tab-bridges" aria-selected="false" aria-controls="panel" tabindex="-1" data-view="bridges">Bridges</button>
-      <button role="tab" id="tab-race" aria-selected="false" aria-controls="panel" tabindex="-1" data-view="race">By race</button>
-    </div>
+  <div class="ab-row ab-tools">
     <div class="search" role="search">
       <label for="q" class="sr">Find a person or organization</label>
       <input id="q" type="text" role="combobox" placeholder="Find a person or group…" autocomplete="off" aria-autocomplete="list" aria-controls="qres" aria-expanded="false" />
       <ul id="qres" role="listbox" aria-label="Matches" hidden></ul>
     </div>
-    <div class="toggles">
-      <label class="switch"><input type="checkbox" id="showall" /> <span>Show one-candidate endorsers</span></label>
-      <label class="select">Color by <select id="colorby"><option value="community">Coalition</option><option value="type">Actor type</option></select></label>
-    </div>
+    <label class="select">Color by <select id="colorby"><option value="community">Coalition</option><option value="type">Actor type</option></select></label>
   </div>
-  <div class="stage wrap-wide">
-    <div class="graph-col">
-      <div id="legend" class="legend"></div>
-      <div id="graph" aria-describedby="graph-desc"></div>
-      <p id="graph-desc" class="sr"><!--GRAPH_SUMMARY--></p>
-      <div class="zoom" role="group" aria-label="Zoom controls"><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button><button id="zreset" aria-label="Reset view">⟲</button></div>
-      <div id="tooltip" class="tooltip" hidden></div>
-      <p id="tray" class="tray" hidden></p>
-      <noscript><p class="noscript">The interactive graphic needs JavaScript. The full data is available in the downloads below.</p></noscript>
+</header>
+<main class="appmain">
+  <div class="graph-col">
+    <div id="graph" aria-describedby="graph-desc"></div>
+    <p id="graph-desc" class="sr"><!--GRAPH_SUMMARY--></p>
+    <details id="legendbox" class="legendbox"><summary>Legend</summary><div id="legend" class="legend"></div><label class="switch"><input type="checkbox" id="showall" /> <span>Show one-candidate endorsers</span></label></details>
+    <div class="zoom" role="group" aria-label="Zoom controls"><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button><button id="zreset" aria-label="Reset view">⟲</button></div>
+    <div id="tooltip" class="tooltip" hidden></div>
+    <p class="credit">Sources: campaign sites, organization endorsement pages, county voter guide. Draft, not yet edited.</p>
+    <noscript><p class="noscript">The graph needs JavaScript. See <a href="/findings/">findings and data</a>.</p></noscript>
+  </div>
+  <aside id="sheet" class="sheet" aria-label="Details">
+    <button id="sheetbtn" class="sheet-handle" aria-expanded="false" aria-controls="panel"><span>Coalitions, bridges and races</span></button>
+    <div class="tabs" role="tablist" aria-label="View">
+      <button role="tab" id="tab-coalitions" aria-selected="true" aria-controls="panel" tabindex="0" data-view="coalitions">Coalitions</button>
+      <button role="tab" id="tab-bridges" aria-selected="false" aria-controls="panel" tabindex="-1" data-view="bridges">Bridges</button>
+      <button role="tab" id="tab-race" aria-selected="false" aria-controls="panel" tabindex="-1" data-view="race">By race</button>
     </div>
     <div id="panel" class="panel" role="tabpanel" aria-labelledby="tab-coalitions" tabindex="0"></div>
-  </div>
-  <button id="pill" class="pill" hidden>Details ↓</button>
-</section>
-
-<section class="matrix-sec wrap-wide" aria-labelledby="hmh">
-  <h2 id="hmh">How often are two candidates grouped together?</h2>
-  <p class="sub">Share of <!--SEEDS--> clustering runs (percent) that put each pair in the same group. Outlined cells are pairs inside a coalition (every pair at least <!--TPCT--> in every batch). Rows and columns are ordered by coalition; unattached candidates come last. A small “s” marks Right to Housing slate members.</p>
-  <p class="scrollhint" aria-hidden="true">Scroll sideways for more columns →</p>
-  <div id="heatmap" class="mwrap"></div>
-</section>
-<section class="matrix-sec overlap-sec wrap-wide" aria-labelledby="ovh">
-  <h2 id="ovh">How much do endorser lists overlap?</h2>
-  <p class="sub">By default, shared endorsers as a percent of everyone who endorses either candidate (Jaccard similarity), so long lists do not dominate. Hover, tap or focus a cell for names. “&lt;1” means under half a percent; blank cells share no endorsers.</p>
-  <p class="scrollhint" aria-hidden="true">Scroll sideways for more columns →</p>
-  <div id="overlap" class="mwrap"></div>
-</section>
-
-<article class="methods wrap"><!--METHODS--></article>
+  </aside>
 </main>
-<footer class="foot wrap"><p>Built from public campaign websites, organization endorsement pages and the Alameda County Voter Information Guide. Every link in this graphic goes to its source; if a listing is wrong, the source page is the place to start.</p></footer>
 <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
