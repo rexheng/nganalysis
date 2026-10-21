@@ -155,8 +155,8 @@ for r in E:
     if s and s not in nodes:
         nodes[s] = dict(id=s, name=sname, type=col(r, 'Endorser type') or 'Individual', title='', variants=[]); name2id.setdefault(sname, s)
     if not s: s = ensure(sname, typ=col(r, 'Endorser type'))
-    tname = col(r, 'Endorses', 'target', 'candidate')
-    t = name2id.get(tname) or ensure(tname, typ='Candidate')
+    tname = col(r, 'Endorses', 'target', 'candidate'); tid = col(r, 'target_id')
+    t = tid if tid in nodes else (name2id.get(tname) or ensure(tname, tid or None, typ='Candidate'))
     rel = col(r, 'Relationship', 'relationship')
     kind = 'member' if rel.lower().startswith('slate member') or rel.lower().startswith('member') else 'endorsement'
     if kind == 'member':   # old format: slate -> member row; normalise to member -> slate
@@ -165,14 +165,18 @@ for r in E:
         add_edge(s, t, kind, r, i)
     if not nodes[s]['title'] and col(r, 'Title/affiliation'): nodes[s]['title'] = col(r, 'Title/affiliation')
     i += 1
+sm_groups = collections.OrderedDict()
 for r in SM:
-    keys = list(r.keys())
     sl = col(r, 'Slate', 'slate', 'slate_name') or SLATE
     mem = col(r, 'Member', 'member', 'Candidate', 'candidate', 'member_name')
     if not mem: continue
-    sid = name2id.get(sl) or ensure(sl, typ='Slate'); mid = name2id.get(mem) or ensure(mem, typ='Candidate')
+    sm_groups.setdefault((sl, col(r, 'slate_id'), mem, col(r, 'member_id')), []).append(r)
+for (sl, slid, mem, mid_), rs in sm_groups.items():
+    sid = name2id.get(sl) or ensure(sl, slid or None, typ='Slate'); mid = name2id.get(mem) or ensure(mem, mid_ or None, typ='Candidate')
     if any(e['kind'] == 'member' and e['s'] == mid and e['t'] == sid for e in edges): continue
-    rr = dict(r); rr.setdefault('Relationship', 'Slate member')
+    srcs = [src_from(r) for r in rs if col(r, 'Source', 'source_url')]
+    es_by_pair[(mid, nodes[sid]['name'])] = srcs
+    rr = dict(rs[0]); rr.setdefault('Relationship', 'Slate member'); rr.pop('edge_id', None)
     add_edge(mid, sid, 'member', rr, i); i += 1
 if bad_urls: raise SystemExit(f'Invalid source URLs: {bad_urls[:5]} ({len(bad_urls)})')
 
@@ -260,14 +264,17 @@ def nm(n): return nodes[n]['name']
 def community_label(ci):
     return 'Coalition ' + 'ABCDEFGHIJKLMNOP'[ci] if ci >= 0 else 'No endorsements recorded'
 bridges = []
-for n in sorted(nodes, key=lambda n: -nodes[n]['bc']):
-    if nodes[n]['bc'] <= 0: continue
+for n in sorted(nodes, key=lambda n: (-nodes[n]['bc'], nodes[n]['name'])):
+    if nodes[n]['bc'] <= 0 and D.out_degree(n) < 2: continue
     outs = sorted(D.successors(n), key=nm); ins = sorted(D.predecessors(n), key=nm)
     by_c = collections.defaultdict(list)
     for m in outs: by_c[comm[m]].append(nm(m))
     by_c_in = collections.defaultdict(list)
     for m in ins: by_c_in[comm[m]].append(nm(m))
-    bridges.append(dict(id=n, bc=nodes[n]['bc'], endorses={str(k): v for k, v in sorted(by_c.items())},
+    ks = collections.Counter(comm[m] for m in outs if comm[m] >= 0)
+    kt = sum(ks.values())
+    pc = round(1 - sum((v / kt) ** 2 for v in ks.values()), 4) if kt else 0.0
+    bridges.append(dict(id=n, bc=nodes[n]['bc'], pc=pc, outComms=len(ks), deg=len(outs), endorses={str(k): v for k, v in sorted(by_c.items())},
                         endorsedBy={str(k): len(v) for k, v in sorted(by_c_in.items())},
                         nComms=len(set(by_c) | set(by_c_in))))
 

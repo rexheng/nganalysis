@@ -29,17 +29,19 @@ async function main() {
     (edgesOut.get(e.s) || edgesOut.set(e.s, []).get(e.s)!).push(e);
     (edgesIn.get(e.t) || edgesIn.set(e.t, []).get(e.t)!).push(e);
   }
-  const endorserBridges = d.bridges.filter((b) => !byId.get(b.id)!.isTarget);
-  const targetBridges = d.bridges.filter((b) => byId.get(b.id)!.isTarget);
+  const endorserBridges = d.bridges.filter((b) => !byId.get(b.id)!.isTarget && b.deg >= 2 && b.bc > 0);
+  const reachBridges = d.bridges.filter((b) => !byId.get(b.id)!.isTarget && b.deg >= 2 && b.outComms >= 2)
+    .slice().sort((a, b) => b.outComms - a.outComms || b.pc - a.pc || b.bc - a.bc || byId.get(a.id)!.name.localeCompare(byId.get(b.id)!.name));
+  const targetBridges = d.bridges.filter((b) => byId.get(b.id)!.isTarget && b.bc > 0);
   const TOPN = 10;
-  const topBridgeSet = new Set(endorserBridges.slice(0, TOPN).map((b) => b.id));
+  let topBridgeSet = new Set(endorserBridges.slice(0, TOPN).map((b) => b.id));
   // competition ranking: ties share a rank
   const rankMap = (bs: typeof endorserBridges) => new Map(bs.map((b) => [b.id, 1 + bs.filter((x) => x.bc > b.bc + 1e-9).length]));
   const bridgeRank = rankMap(endorserBridges);
   const targetRank = rankMap(targetBridges);
 
   const state = { view: 'coalitions' as View, selected: null as string | null, hovered: null as string | null,
-    showAll: false, colorBy: 'community' as 'community' | 'type', race: d.races[1]?.race || d.races[0].race, bridgeCands: false };
+    showAll: false, colorBy: 'community' as 'community' | 'type', race: d.races[1]?.race || d.races[0].race, bridgeCands: false, bridgeSort: 'bc' as 'bc' | 'reach' };
 
   // ---------- graph ----------
   const g = new Graph({ type: 'directed', multi: false });
@@ -69,6 +71,7 @@ async function main() {
   let FOCUS: Set<string> | null = null;
   let RACE_SHARED = new Set<string>();
   function recompute() {
+    topBridgeSet = new Set((state.bridgeSort === 'reach' ? reachBridges : endorserBridges).slice(0, TOPN).map((b) => b.id));
     FOCUS = focusSet();
     RACE_SHARED = new Set();
     if (state.view === 'race') {
@@ -96,8 +99,8 @@ async function main() {
       }
       if (!inFocus) { r.color = DIM; r.forceLabel = false; r.label = n.isTarget ? attr.label : ''; r.labelColor = '#bbb'; r.zIndex = 0; if (n.isTarget) { r.forceLabel = true; r.dimLabel = true; } }
       if (state.view === 'bridges' && !active) {
-        const rank = state.bridgeCands ? targetRank.get(id) : bridgeRank.get(id);
-        if (rank && rank <= TOPN) { r.forceLabel = true; r.label = `${rank}. ${n.name}`; r.size = Math.max(attr.size * 1.5, 7); r.zIndex = 4; r.ring = true; }
+        const rank = state.bridgeCands ? targetRank.get(id) : (state.bridgeSort === 'reach' ? (topBridgeSet.has(id) ? reachBridges.findIndex((b) => b.id === id) + 1 : undefined) : bridgeRank.get(id));
+        if (rank && rank <= TOPN && (state.bridgeCands || topBridgeSet.has(id))) { r.forceLabel = true; r.label = `${rank}. ${n.name}`; r.size = Math.max(attr.size * 1.5, 7); r.zIndex = 4; r.ring = true; }
       }
       if (state.view === 'race' && !active && RACE_SHARED.has(id)) { r.size = Math.max(attr.size * 1.4, 5.5); r.zIndex = 4; r.ring = true; if (RACE_SHARED.size <= (isNarrow ? 6 : 14)) r.forceLabel = true; }
       if (active && id === active) { r.forceLabel = true; r.zIndex = 5; r.ring = true; r.highlighted = false; }
@@ -241,15 +244,19 @@ async function main() {
     let html = `<button class="back" data-back>← Back to ${state.view === 'race' ? 'race view' : state.view}</button>
       <div class="ncard"><p class="ntype">${typeDot(n.type)}${esc(n.type)}${n.race ? ` · ${esc(n.race)}` : ''}</p>
       <h3>${esc(n.name)}</h3>
-      ${n.typeNote ? `<p class="muted small">${esc(n.typeNote)}</p>` : ''}${n.status ? `<p class="muted small">Status: ${esc(n.status)}</p>` : ''}
+      ${n.typeNote ? `<p class="muted small">${esc(n.typeNote)}</p>` : ''}${n.status && !/^(on ballot|slate)$/i.test(n.status) ? `<p class="muted small">Status: ${esc(n.status)}</p>` : ''}
       ${titles.length ? `<p class="ttl-main">${titles.slice(0, 2).map(esc).join(' · ')}</p>` : ''}
       <p class="meta">${chip(n.community)} Placed in <strong>${esc(commName(n.community))}</strong>${comms > 1 ? ` · connected to ${numWord(comms)} coalitions` : ''}</p>
       ${n.campaignUrl ? `<p class="meta"><a href="${esc(n.campaignUrl)}" target="_blank" rel="noopener">Campaign site ↗</a>${n.endorsementsPage && n.endorsementsPage !== n.campaignUrl ? ` · <a href="${esc(n.endorsementsPage)}" target="_blank" rel="noopener">Endorsements page ↗</a>` : ''}</p>` : ''}
       ${bLine}${sentence}</div>`;
-    const mem = memberEdges.filter((e) => e.t === id);
-    if (mem.length) html += `<h4>Members <span class="cnt">${mem.length}</span></h4><ul class="elist">${mem.map((e) => edgeRow(e, e.s, false)).join('')}</ul>`;
-    const memOf = memberEdges.filter((e) => e.s === id);
-    if (memOf.length) html += `<h4>Member of</h4><ul class="elist">${memOf.map((e) => edgeRow(e, e.t, false)).join('')}</ul>`;
+    const isMem = (e: GEdge) => /member/i.test(e.rel);
+    const struct: [string, GEdge[], 's' | 't'][] = [
+      ['Members', memberEdges.filter((e) => e.t === id && isMem(e)), 's'],
+      ['Nominated by', memberEdges.filter((e) => e.t === id && !isMem(e)), 's'],
+      ['Member of', memberEdges.filter((e) => e.s === id && isMem(e)), 't'],
+      ['Nominated', memberEdges.filter((e) => e.s === id && !isMem(e)), 't'],
+    ];
+    for (const [h, es, side] of struct) if (es.length) html += `<h4>${h} <span class="cnt">${es.length}</span> <span class="small muted" style="text-transform:none;letter-spacing:0">not an endorsement</span></h4><ul class="elist">${es.map((e) => edgeRow(e, side === 's' ? e.s : e.t, false)).join('')}</ul>`;
     if (outs.length) html += `<h4>Endorses <span class="cnt">${outs.length}</span></h4><ul class="elist">${outs.map((e) => edgeRow(e, e.t, false)).join('')}</ul>`;
     if (ins.length) html += `<h4>Endorsed by <span class="cnt">${ins.length}</span></h4>${groupedIn(id)}`;
     if (n.isTarget && !ins.length) html += `<p class="muted">No endorsements recorded for this candidate. See the methodology notes below.</p>`;
@@ -263,29 +270,36 @@ async function main() {
       const bar = tc.map(([t, v]) => `<span style="flex:${v};background:${TYPE_COLORS[t] || '#999'}" title="${esc(t)}: ${v}"></span>`).join('');
       return `<li class="coal"><div class="coal-h">${chip(c.id)}<strong>${commName(c.id)}</strong><span class="muted small">${c.size} actors${c.stability != null ? ` · candidates grouped together in ${Math.round(c.stability * 100)}% of runs` : ''}</span></div>
         <p class="coal-c">${coalitionTargets(d, c.id, { html: true }).join(', ')}</p>
-        <div class="tbar" aria-label="Endorser types">${bar}</div><p class="tbar-l small muted">${tc.slice(0, 3).map(([t, v]) => `${v} ${esc(t.toLowerCase())}${v !== 1 && !t.endsWith('s') ? (t === 'Individual' ? 's' : '') : ''}`).join(' · ')}</p></li>`;
+        <div class="tbar" aria-label="Endorser types">${bar}</div><p class="tbar-l small muted">${tc.slice(0, 3).map(([t, v]) => `${v} ${esc(t.toLowerCase())}${v !== 1 ? 's' : ''}`).join(' · ')}</p></li>`;
     }).join('');
     return `<h3 class="ph">${numWord(d.communities.length).replace(/^./, (c) => c.toUpperCase())} coalitions</h3>
       <p class="pintro">Colors show the group each actor was assigned to by the Louvain algorithm (modularity ${S.modularity.toFixed(2)}). Click a name to see its endorsers and sources.</p><ol class="coals">${items}</ol>`;
   }
 
   function bridgesPanel() {
-    const list = (state.bridgeCands ? targetBridges : endorserBridges)
-      .filter((b, i, arr) => i < 15 || (state.bridgeCands ? targetRank : bridgeRank).get(b.id) === (state.bridgeCands ? targetRank : bridgeRank).get(arr[14].id));
-    const max = list[0]?.bc || 1;
-    const rmap = state.bridgeCands ? targetRank : bridgeRank;
-    const rows = list.map((b) => {
-      const n = byId.get(b.id)!; const rk = rmap.get(b.id)!;
-      const tie = list.filter((x) => rmap.get(x.id) === rk).length > 1;
+    const mode = state.bridgeCands ? 'cand' : state.bridgeSort;
+    const src = mode === 'cand' ? targetBridges : mode === 'reach' ? reachBridges : endorserBridges;
+    const rmap = mode === 'cand' ? targetRank : mode === 'reach' ? null : bridgeRank;
+    const list = src.slice(0, 15);
+    const max = Math.max(...list.map((b) => b.bc), 1e-9);
+    const rows = list.map((b, i) => {
+      const n = byId.get(b.id)!;
+      const rk = rmap ? rmap.get(b.id)! : i + 1;
+      const tie = rmap ? list.filter((x) => rmap.get(x.id) === rk).length > 1 : false;
       return `<li><div class="br-h"><span class="rank">${tie ? '=' : ''}${rk}</span>${nlink(b.id, 'strong')}<span class="muted small">${esc(n.type)}</span></div>
       <div class="br-bar"><span style="width:${(100 * b.bc) / max}%;background:${commColor(n.community)}"></span><em>${b.bc.toFixed(4)}</em></div>
+      ${mode !== 'cand' ? `<p class="br-meta">betweenness ${b.bc.toFixed(4)} · reaches ${b.outComms} coalition${b.outComms === 1 ? '' : 's'} · participation ${b.pc.toFixed(2)}</p>` : ''}
       <p class="sentence small">${bridgeSentence(d, b.id)}</p></li>`;
     }).join('');
+    const expl = mode === 'cand'
+      ? '<p class="small muted">Candidates score high mainly because they are hubs: every one of their endorsers is connected through them. Shown for reference only.</p>'
+      : mode === 'reach'
+        ? '<p class="small muted">Endorsers ranked by how many coalitions their endorsements reach, then by how evenly they split them (participation: 0 = all in one coalition; higher = spread across several).</p>'
+        : '<p class="small muted"><strong>Betweenness</strong>: if you trace the shortest chain of endorsements between every pair of actors, how often does it run through this one? Endorsers who sit between otherwise separate groups score highest.</p>';
     return `<h3 class="ph">Who bridges the coalitions</h3>
-      <p class="pintro">Ranked by betweenness centrality: how often an actor lies on the shortest path between two others. Explanations list the candidates each actor endorses, with the coalition of each.</p>
-      <div class="seg" role="group" aria-label="Rank"><button data-bc="0" aria-pressed="${!state.bridgeCands}">Endorsers</button><button data-bc="1" aria-pressed="${state.bridgeCands}">Candidates</button></div>
-      ${state.bridgeCands ? '<p class="small muted">Candidates score high mainly because they are hubs with many endorsers.</p>' : ''}
-      <ol class="bridges">${rows}</ol>`;
+      <p class="pintro">Endorsers (people and groups, not candidates) who back at least two candidates, ranked by how much they connect the coalitions. Each line lists who they endorse, with each candidate’s coalition.</p>
+      <div class="seg" role="group" aria-label="Ranking"><button data-bsort="bc" aria-pressed="${mode === 'bc'}">Betweenness</button><button data-bsort="reach" aria-pressed="${mode === 'reach'}">Coalitions reached</button><button data-bsort="cand" aria-pressed="${mode === 'cand'}">Candidates</button></div>
+      ${expl}<ol class="bridges">${rows}</ol>`;
   }
 
   function racePanel() {
@@ -325,7 +339,7 @@ async function main() {
     const items = state.colorBy === 'community'
       ? d.communities.map((c) => `<li>${chip(c.id)}<span>${esc(commName(c.id))}</span></li>`).join('')
       : TYPE_ORDER.filter((t) => d.nodes.some((n) => n.type === t)).map((t) => `<li>${typeDot(t)}<span>${esc(t)}</span></li>`).join('');
-    L.innerHTML = `<ul>${items}</ul><p>${memberEdges.length ? '<span class="mline"></span>slate membership (not an endorsement) · ' : ''}Dot size: endorsements given or received${state.showAll ? '' : ' · <span class="tdot" style="--c:' + FADE + '"></span>grey = backs one candidate'}</p>`;
+    L.innerHTML = `<ul>${items}</ul><p>${memberEdges.length ? '<span class="mline"></span>slate membership or nomination (not an endorsement) · ' : ''}Dot size: endorsements given or received${state.showAll ? '' : ' · <span class="tdot" style="--c:' + FADE + '"></span>grey = backs one candidate'}</p>`;
   }
 
   // ---------- interactions ----------
@@ -352,7 +366,7 @@ async function main() {
     if (nb) { ev.preventDefault(); const id = nb.dataset.node!; if (!panel.contains(nb)) document.getElementById('explore')!.scrollIntoView({ behavior: 'smooth' }); select(id); return; }
     if (t.closest('[data-back]')) { select(null); return; }
     const rb = t.closest<HTMLElement>('[data-race]'); if (rb) { state.race = rb.dataset.race!; recompute(); renderer.refresh({ skipIndexation: true }); renderPanel(); return; }
-    const bc = t.closest<HTMLElement>('[data-bc]'); if (bc) { state.bridgeCands = bc.dataset.bc === '1'; recompute(); renderer.refresh({ skipIndexation: true }); renderPanel(); return; }
+    const bs = t.closest<HTMLElement>('[data-bsort]'); if (bs) { const v = bs.dataset.bsort!; state.bridgeCands = v === 'cand'; if (v !== 'cand') state.bridgeSort = v as any; recompute(); renderer.refresh({ skipIndexation: true }); renderPanel(); return; }
     const sm = t.closest<HTMLButtonElement>('.showmore');
     if (sm) { const el = sm.previousElementSibling; el?.querySelectorAll('li.more').forEach((li) => ((li as HTMLElement).hidden = false)); sm.remove(); }
   });

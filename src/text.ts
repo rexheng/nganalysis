@@ -32,7 +32,7 @@ export function index(d: Data) {
   }
   const slate = byName.get(SLATE);
   const ix_isSlate = (id: string) => !slate || id === slate.id;
-  const slateMembers = d.edges.filter((e) => e.kind === 'member' && ix_isSlate(e.t)).map((e) => e.s);
+  const slateMembers = d.edges.filter((e) => e.kind === 'member' && /member/i.test(e.rel) && ix_isSlate(e.t)).map((e) => e.s);
   return { byId, byName, out, inn, slate, slateMembers };
 }
 

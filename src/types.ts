@@ -10,7 +10,7 @@ export interface GEdge {
   kind: 'endorsement' | 'member'; src: GSrc[]; date: string; check: string; asw: string;
 }
 export interface Community { id: number; size: number; coreSize: number; targets: string[]; stability: number | null; typeCounts: Record<string, number>; }
-export interface Bridge { id: string; bc: number; endorses: Record<string, string[]>; endorsedBy: Record<string, number>; nComms: number; }
+export interface Bridge { id: string; bc: number; pc: number; outComms: number; deg: number; endorses: Record<string, string[]>; endorsedBy: Record<string, number>; nComms: number; }
 export interface Overlap { a: string; b: string; n: number; j: number; shared: string[]; }
 export interface Summary {
   generated: string; nEdges: number; nEndorsementEdges: number; nMemberEdges?: number; nNodes: number; nEndorsers: number; nSingle: number;

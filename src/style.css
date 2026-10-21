@@ -155,3 +155,4 @@ h1{font-family:var(--serif);font-weight:700;font-size:clamp(32px,5.2vw,50px);lin
 }
 @media (prefers-reduced-motion: reduce){*{scroll-behavior:auto!important}}
 .mline{display:inline-block;width:18px;height:0;border-top:2px solid rgba(123,50,148,.8);vertical-align:3px;margin-right:5px}
+.br-meta{margin:0 0 0 26px;font-size:11.5px;color:var(--muted)}
