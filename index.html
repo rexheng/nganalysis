@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>%TITLE%</title>
+<meta name="description" content="%DESC%" />
+<meta property="og:title" content="Who bridges Berkeley’s endorsement coalitions?" />
+<meta property="og:description" content="%DESC%" />
+<meta property="og:type" content="article" />
+<meta name="theme-color" content="#ffffff" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='9' cy='10' r='5' fill='%23D55E00'/%3E%3Ccircle cx='23' cy='10' r='5' fill='%230072B2'/%3E%3Ccircle cx='16' cy='23' r='5' fill='%23009E73'/%3E%3Cpath d='M9 10L23 10L16 23Z' stroke='%23222' fill='none' stroke-width='1.5'/%3E%3C/svg%3E" />
+</head>
+<body>
+<a class="skip" href="#explore">Skip to the interactive graphic</a>
+<header class="masthead"><div class="wrap"><span class="kicker">The Daily Californian &middot; Election 2026 &middot; Data</span></div></header>
+<main>
+<article class="story wrap">
+  <p class="eyebrow">Berkeley endorsements, November 2026</p>
+  <h1><!--HEADLINE--></h1>
+  <p class="dek"><!--DEK--></p>
+  <p class="stats"><!--STATS--></p>
+  <section class="findings" aria-labelledby="kf"><h2 id="kf">What the network shows</h2><ol><!--FINDINGS--></ol></section>
+  <p class="howto">Each dot is a candidate, person or organization; a line means one endorsed the other. Dots are placed by a force-directed layout, so actors who share many endorsements sit close together. Hover or tap a dot to see its connections, click it for details and sources, or search for a name.</p>
+</article>
+
+<section id="explore" class="explore" aria-label="Interactive endorsement network">
+  <div class="toolbar wrap-wide">
+    <div class="tabs" role="tablist" aria-label="View">
+      <button role="tab" id="tab-coalitions" aria-selected="true" data-view="coalitions">Coalitions</button>
+      <button role="tab" id="tab-bridges" aria-selected="false" data-view="bridges">Bridges</button>
+      <button role="tab" id="tab-race" aria-selected="false" data-view="race">By race</button>
+    </div>
+    <div class="search" role="search">
+      <label for="q" class="sr">Find a person or organization</label>
+      <input id="q" type="search" placeholder="Find a person or group…" autocomplete="off" aria-autocomplete="list" aria-controls="qres" aria-expanded="false" />
+      <ul id="qres" role="listbox" hidden></ul>
+    </div>
+    <div class="toggles">
+      <label class="switch"><input type="checkbox" id="showall" /> <span>Show all endorsers</span></label>
+      <label class="select">Color by <select id="colorby"><option value="community">Coalition</option><option value="type">Actor type</option></select></label>
+    </div>
+  </div>
+  <div class="stage wrap-wide">
+    <div class="graph-col">
+      <div id="legend" class="legend"></div>
+      <div id="graph" role="img" aria-label="Network graph of endorsements. Use the lists beside the graph for a text version."></div>
+      <div class="zoom" aria-label="Zoom controls"><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button><button id="zreset" aria-label="Reset view">⟲</button></div>
+      <div id="tooltip" class="tooltip" hidden></div>
+      <noscript><p class="noscript">The interactive graphic needs JavaScript. The full data is available in the downloads below.</p></noscript>
+    </div>
+    <aside id="panel" class="panel" aria-live="polite"></aside>
+  </div>
+</section>
+
+<section class="overlap-sec wrap-wide" aria-labelledby="ovh">
+  <h2 id="ovh">How much do endorser lists overlap?</h2>
+  <p class="sub">Number of endorsers shared by each pair of candidates, ordered by coalition. Darker means more shared endorsers. Hover or tap a cell for names.</p>
+  <div id="overlap" class="overlap"></div>
+</section>
+
+<article class="methods wrap"><!--METHODS--></article>
+</main>
+<footer class="foot wrap"><p>Built from public campaign websites and the Alameda County Voter Information Guide. Corrections: every link in this graphic goes to its source; if a listing is wrong, the source page is the place to start.</p></footer>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
