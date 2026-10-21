@@ -16,7 +16,7 @@ export interface Community {
   borderline: boolean; ambiguous: Ambig[];
   nEndorsersOfTargets: number; typeCounts: Record<string, number>;
 }
-export interface Loose { id: string; best: number; bestConf: number; partners: { t: string; p: number; pConf: number }[]; groupedIn: { members: string[]; where: string[] }[] }
+export interface Loose { id: string; best: number; bestConf: number; partners: { t: string; p: number; pConf: number }[]; groupedIn: { members: string[]; where: string[] }[]; nearBloc?: number; nearMin?: number; nearMinConf?: number }
 export interface Variant { members: string[]; where: string[]; meanAll: number; meanConf: number }
 export interface Tie { a: string; b: string; max: number; maxA: string; maxB: string; mean: number }
 export interface Bridge {
@@ -32,7 +32,7 @@ export interface SlateOverlap {
 export interface Summary {
   generated: string; nEdges: number; nEndorsementEdges: number; nMemberEdges: number; nNodes: number; nEndorsers: number; nSingle: number;
   nCandidates: number; nCore: number; nCoreEdges: number; runs: number; pools: number; nRuns: number; border: number; linkage: string;
-  poolsAgree: Record<string, boolean>; variantPartitions: Record<string, string[][]>; bootGroups: Record<string, number>;
+  poolsAgree: Record<string, boolean>; variantPartitions: Record<string, string[][]>; bootGroups: Record<string, number>; bootFate?: Record<string, number>[]; bootIntactAll?: number; poolsMinAgree?: boolean; minRefused?: { set: string[]; v: number } | null;
   refusedMerges: Record<string, ({ set: string[]; v: number } | null)[]>; zeroDropped?: { pamphletOnly: number; candidates: number; other: number };
   nCommunitiesDistribution: Record<string, number>; relCounts: Record<string, number>; typeCounts: Record<string, number>;
   endorserTypeCounts: Record<string, number>; sourceTypeCounts: Record<string, number>; edgeSourceTypeCounts: Record<string, number>;

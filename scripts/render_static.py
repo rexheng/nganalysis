@@ -70,7 +70,7 @@ def render(d, W, fs, narrow):
         hull_tops[c['id']] = top
         occupied_pre.append((top[0] - fs * 0.7, top[1] - fs * 0.7 - 2, top[0] + fs * 0.7, top[1] + fs * 0.7 - 2))
     # edges (core endorsement edges + membership)
-    el = []
+    el = []; pl = []
     for e in d['edges']:
         if e['s'] in P and e['t'] in P:
             (x1, y1), (x2, y2) = P[e['s']], P[e['t']]
@@ -80,9 +80,11 @@ def render(d, W, fs, narrow):
                 cs, ct = N[e['s']]['community'], N[e['t']]['community']
                 cross = cs != ct
                 prob = 'probable' in (e.get('conf') or '').lower()
-                dash = f' stroke-dasharray="1 {4 if narrow else 3}" stroke-linecap="round"' if prob else ''
-                el.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="{"#3d3d3d" if cross else "#8c8c8c"}" stroke-opacity="{.32 if cross else .3}" stroke-width="{(1.6 if narrow else 1.3) if prob else (.9 if narrow else .8)}"{dash}/>')
-    out.insert(0, '<g>' + ''.join(el) + '</g>')
+                if prob:   # same as the interactive graph: solid blue, heavier
+                    pl.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="#1f6fd1" stroke-opacity=".95" stroke-width="{2.6 if narrow else 2}"/>')
+                    continue
+                el.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="{"#3d3d3d" if cross else "#8c8c8c"}" stroke-opacity="{.32 if cross else .3}" stroke-width="{.9 if narrow else .8}"/>')
+    out.insert(0, '<g>' + ''.join(el) + ''.join(pl) + '</g>')
     # nodes
     occupied = list(occupied_pre)   # rects (x0,y0,x1,y1)
     nl = []
@@ -106,26 +108,32 @@ def render(d, W, fs, narrow):
     def place(lbl, x, y, r, fsz, bold, force):
         w = text_w(lbl, fsz, bold); h = fsz * 1.05
         cands = [(x + r + 3, y + h * 0.35, 'start'), (x - r - 3, y + h * 0.35, 'end'), (x, y - r - 4, 'middle'), (x, y + r + h * 0.95, 'middle')]
-        if force:   # more room for guaranteed labels: diagonals and a step further out
-            for k in (1, 2):
-                dy = (r + h * 0.6) * k
-                cands += [(x + r + 3, y - dy + h * 0.35, 'start'), (x + r + 3, y + dy + h * 0.35, 'start'),
-                          (x - r - 3, y - dy + h * 0.35, 'end'), (x - r - 3, y + dy + h * 0.35, 'end'),
-                          (x, y - r - 4 - h * k, 'middle'), (x, y + r + h * (0.95 + k), 'middle')]
+        if force:   # more room for guaranteed labels: rings of positions further out (drawn with a leader line)
+            for k in (1, 2, 3, 4, 5):
+                dist = r + h * (0.9 * k)
+                for j in range(16):
+                    a = 2 * math.pi * j / 16; cx_, cy_ = x + dist * math.cos(a), y + dist * math.sin(a)
+                    anc = 'start' if math.cos(a) > 0.3 else 'end' if math.cos(a) < -0.3 else 'middle'
+                    cands.append((cx_, cy_ + h * 0.35, anc))
         own = (x - r - 0.5, y - r - 0.5, x + r + 0.5, y + r + 0.5)
         best = None
+        def lead(tx, ty, rect):
+            if math.hypot(tx - x, ty - h * 0.35 - y) > r + h * 1.3:   # far from its node: draw a leader line
+                lx = min(max(x, rect[0]), rect[2]); ly = min(max(y, rect[1]), rect[3])
+                ang = math.atan2(ly - y, lx - x)
+                leaders.append(f'<line x1="{x + r * math.cos(ang):.1f}" y1="{y + r * math.sin(ang):.1f}" x2="{lx:.1f}" y2="{ly:.1f}" stroke="#111" stroke-width="{1.4 if narrow else 1}"/>')
         for tx, ty, anc in cands:
             x0 = tx if anc == 'start' else tx - w if anc == 'end' else tx - w / 2
             rect = (x0 - 2, ty - h * 0.85, x0 + w + 2, ty + h * 0.2)
             if rect[0] < 0 or rect[2] > W or rect[1] < 0 or rect[3] > H: continue
             ov = sum(max(0, min(rect[2], o[2]) - max(rect[0], o[0])) * max(0, min(rect[3], o[3]) - max(rect[1], o[1]))
                      for o in occupied if not (abs(o[0] - own[0]) < 1 and abs(o[3] - own[3]) < 1))
-            if ov == 0: occupied.append(rect); return tx, ty, anc
+            if ov == 0: occupied.append(rect); lead(tx, ty, rect); return tx, ty, anc
             if best is None or ov < best[0]: best = (ov, tx, ty, anc, rect)
         if force and best:
-            occupied.append(best[4]); return best[1], best[2], best[3]
+            occupied.append(best[4]); lead(best[1], best[2], best[4]); return best[1], best[2], best[3]
         return None
-    labels = []
+    labels = []; leaders = []
     for i, b in enumerate(top):
         n = N[b['id']]; x, y = P[b['id']]
         lbl = f'{i + 1}' if narrow else f'{i + 1} {n["name"]}'
@@ -137,7 +145,7 @@ def render(d, W, fs, narrow):
         lbl = short_name(n) + (' (withdrew)' if n.get('analysisEndorser') else '')
         p = place(lbl, x, y, rad(n), fs * 0.92, False, True)
         if p: labels.append((p, lbl, False))
-    tl = []
+    tl = list(leaders)
     for p, lbl, bold in labels:
         if not p: continue
         tx, ty, anc = p

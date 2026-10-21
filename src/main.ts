@@ -2,11 +2,12 @@ import './fonts.css';
 import './style.css';
 import Graph from 'graphology';
 import Sigma from 'sigma';
+import { createNormalizationFunction, graphExtent, matrixFromCamera, multiplyVec2 } from 'sigma/utils';
 import { createNodeBorderProgram } from '@sigma/node-border';
 import type { Data, GNode, GEdge, Bridge } from './types';
 import {
   commColor, commName, LETTERS, esc, index, bridgeSentence, listJoin, numWord, chip, nlink, typeGlyph, TYPE_ORDER, TYPE_RAMP,
-  blocName, campOf, nCamps, pct, raceShort, srcLabel, srcHref, shortName, surname, robustBridges, pairPct, onColor, plural,
+  blocName, campOf, nCamps, pct, raceShort, srcLabel, srcHref, shortName, surname, robustBridges, pairPct, onColor, plural, pctCut, weakPct, marginLabel, nearMisses,
 } from './text';
 const isProb = (e: { conf?: string }) => /probable/i.test(e.conf || '');
 
@@ -93,11 +94,11 @@ async function main() {
     ],
     drawLabel: undefined, drawHover: undefined,
   });
-  const renderer = new Sigma(g, container, {
+  const SETTINGS: any = {
     renderLabels: false, renderEdgeLabels: false, zIndex: true, stagePadding: 18, minCameraRatio: 0.06, maxCameraRatio: 2.5,
     defaultNodeType: 'border', nodeProgramClasses: { border: BorderProgram as any }, defaultEdgeColor: '#d6d6d6',
     defaultDrawNodeHover: () => undefined,
-    nodeReducer: (id, attr) => {
+    nodeReducer: (id: string, attr: any) => {
       const n = byId.get(id)!; const r: any = { ...attr, zIndex: 1, borderSize: 0 };
       const active = state.hovered || state.selected;
       const inFocus = !FOCUS || FOCUS.has(id);
@@ -114,7 +115,7 @@ async function main() {
       if (active === id) r.zIndex = 5;
       return r;
     },
-    edgeReducer: (eid, attr) => {
+    edgeReducer: (eid: string, attr: any) => {
       const s = g.source(eid), t = g.target(eid); const r: any = { ...attr };
       const sn = byId.get(s)!, tn = byId.get(t)!;
       const active = state.hovered || state.selected;
@@ -145,7 +146,48 @@ async function main() {
       return r;
       }
     },
-  });
+  };
+  let renderer: Sigma | null = null;
+  // Until the first interaction the graph is a 2D-canvas preview drawn with sigma's own camera math and the same
+  // reducers, so the page becomes interactive without paying for WebGL set-up during load.
+  const preview = document.createElement('canvas'); preview.className = 'preview'; preview.setAttribute('aria-hidden', 'true');
+  container.appendChild(preview);
+  const pctx = preview.getContext('2d')!;
+  const pvPos = new Map<string, { x: number; y: number; r: number }>();
+  let bbox: { x: [number, number]; y: [number, number] } | null = null;
+  let pvFrame = 0;
+  function drawPreview() {
+    pvFrame = 0;
+    if (renderer) return;
+    const w = container.clientWidth, h = container.clientHeight; if (!w || !h) return;
+    const dpr = window.devicePixelRatio || 1;
+    if (preview.width !== Math.round(w * dpr) || preview.height !== Math.round(h * dpr)) { preview.width = Math.round(w * dpr); preview.height = Math.round(h * dpr); preview.style.width = w + 'px'; preview.style.height = h + 'px'; }
+    pctx.setTransform(dpr, 0, 0, dpr, 0, 0); pctx.clearRect(0, 0, w, h);
+    const ext = bbox || graphExtent(g);
+    const normF = createNormalizationFunction(ext);
+    const M = matrixFromCamera(home(), { width: w, height: h }, { width: ext.x[1] - ext.x[0] || 1, height: ext.y[1] - ext.y[0] || 1 }, SETTINGS.stagePadding);
+    pvPos.clear();
+    const nd: any[] = [];
+    g.forEachNode((id, a) => {
+      const r: any = SETTINGS.nodeReducer(id, a); if (r.hidden) return;
+      const v = multiplyVec2(M, normF({ x: a.x, y: a.y }) as any);
+      const X = ((1 + v.x) * w) / 2, Y = ((1 - v.y) * h) / 2;
+      pvPos.set(id, { x: X, y: Y, r: r.size }); nd.push({ ...r, X, Y });
+    });
+    const ed: any[] = [];
+    g.forEachEdge((eid, a, s_, t_) => { const r: any = SETTINGS.edgeReducer(eid, a); if (r.hidden) return; const p1 = pvPos.get(s_), p2 = pvPos.get(t_); if (p1 && p2) ed.push({ ...r, p1, p2 }); });
+    ed.sort((x, y) => (x.zIndex || 0) - (y.zIndex || 0));
+    pctx.lineCap = 'butt';
+    for (const e of ed) { pctx.strokeStyle = e.color || SETTINGS.defaultEdgeColor; pctx.lineWidth = Math.max(0.6, e.size || 1); pctx.beginPath(); pctx.moveTo(e.p1.x, e.p1.y); pctx.lineTo(e.p2.x, e.p2.y); pctx.stroke(); }
+    nd.sort((x, y) => (x.zIndex || 0) - (y.zIndex || 0));
+    for (const n of nd) {
+      if (n.borderSize > 0) { pctx.fillStyle = n.borderColor; pctx.beginPath(); pctx.arc(n.X, n.Y, n.size, 0, Math.PI * 2); pctx.fill(); }
+      pctx.fillStyle = n.color; pctx.beginPath(); pctx.arc(n.X, n.Y, Math.max(0, n.size - (n.borderSize || 0)), 0, Math.PI * 2); pctx.fill();
+    }
+    drawOverlay();
+  }
+  /** redraw: sigma once it exists, the preview until then */
+  const refresh = (opts?: any) => { if (renderer) renderer.refresh(opts); else if (!pvFrame) pvFrame = requestAnimationFrame(drawPreview); };
 
   await tick();
   // ---------- overlay: collision-aware labels, rings, letters ----------
@@ -160,7 +202,8 @@ async function main() {
   }
   sizeOverlay();
   type Lab = { id: string; texts: string[]; force: boolean; weight: number; dim?: boolean };
-  const altName = (n: GNode) => (n.type === 'Slate' ? 'Slate' : /Individual|official|Candidate/.test(n.type) ? surname(n) : shortName(n));
+  const lblName = (n: GNode) => (n.type === 'Slate' ? n.name : shortName(n));
+  const altName = (n: GNode) => (n.type === 'Slate' ? 'Slate' : /Individual|official|Candidate/.test(n.type) ? surname(n) : lblName(n));
   const ringNum = (id: string) => (state.view === 'bridges' ? rankOf(id) : coalTopBridges().indexOf(id) + 1);
   function labelPlan(): Lab[] {
     const L: Lab[] = []; const narrow = narrowMQ.matches;
@@ -170,22 +213,22 @@ async function main() {
       const tx = texts.filter((t, i) => t && texts.indexOf(t) === i);
       L.push({ id, texts: tx, force, weight, dim });
     };
-    if (active) { const n = byId.get(active)!; push(active, [n.name, shortName(n), altName(n)], true, 750); }
+    if (active) { const n = byId.get(active)!; push(active, [n.name, lblName(n), altName(n)], true, 750); }
     // numbered rings: names where they fit, at least the number
     const tb = [...TOPB].filter((id) => !active || (FOCUS && FOCUS.has(id)));
-    tb.forEach((id) => { const n = byId.get(id)!; const k = ringNum(id); push(id, [`${k}. ${shortName(n)}`, `${k}. ${altName(n)}`, `${k}`], true, 750); });
+    tb.forEach((id) => { const n = byId.get(id)!; const k = ringNum(id); push(id, [`${k}. ${lblName(n)}`, `${k}. ${altName(n)}`, `${k}`], true, 750); });
     // every candidate, at every width (dimmed when outside the focus)
     const cands = d.nodes.filter((n) => n.isTarget && g.hasNode(n.id)).sort((a, b) => Number(!!a.memberOf) - Number(!!b.memberOf) || b.inDeg - a.inDeg);
     const nbs = active && FOCUS ? [...FOCUS].filter((x) => x !== active) : [];
     const nbForce = nbs.length <= 40;
-    const cn = (n: GNode) => (narrow ? [altName(n)] : [shortName(n), altName(n)]);
+    const cn = (n: GNode) => (narrow ? [altName(n)] : [lblName(n), altName(n)]);
     for (const n of cands) if (!FOCUS || FOCUS.has(n.id)) push(n.id, cn(n), true, 650);
     // every neighbour of the selected node (all of them when there are up to 40; otherwise those with 2+ links)
     nbs.sort((a, b) => (byId.get(b)!.inDeg + byId.get(b)!.outDeg) - (byId.get(a)!.inDeg + byId.get(a)!.outDeg))
-      .forEach((id, i) => { const n = byId.get(id)!; if (nbForce || i < (narrow ? 12 : 30)) push(id, [shortName(n), altName(n)], true, 600); else if (!n.leaf) push(id, [shortName(n), altName(n)], false, 550); });
+      .forEach((id, i) => { const n = byId.get(id)!; if (nbForce || i < (narrow ? 12 : 30)) push(id, [lblName(n), altName(n)], true, 600); else if (!n.leaf) push(id, [lblName(n), altName(n)], false, 550); });
     if (state.view === 'race') {
-      for (const c of raceSet()) { const n = byId.get(c)!; push(c, [shortName(n), altName(n)], true, 700); }
-      if (RACE_SHARED.size <= (narrow ? 8 : 16)) [...RACE_SHARED].forEach((id) => { const n = byId.get(id)!; push(id, [shortName(n), altName(n)], false, 550); });
+      for (const c of raceSet()) { const n = byId.get(c)!; push(c, [lblName(n), altName(n)], true, 700); }
+      if (RACE_SHARED.size <= (narrow ? 8 : 16)) [...RACE_SHARED].forEach((id) => { const n = byId.get(id)!; push(id, [lblName(n), altName(n)], false, 550); });
     }
     for (const n of cands) push(n.id, cn(n), true, 500, true);
     return L;
@@ -195,7 +238,8 @@ async function main() {
     octx.clearRect(0, 0, w, h);
     const fs = narrowMQ.matches ? 12 : 12.5;
     const placed: [number, number, number, number][] = [];
-    const vp = (id: string) => { const dd: any = renderer.getNodeDisplayData(id); if (!dd || dd.hidden) return null; const p = renderer.framedGraphToViewport({ x: dd.x, y: dd.y }); return { x: p.x, y: p.y, r: renderer.scaleSize(dd.size) }; };
+    const R = renderer;
+    const vp = (id: string) => { if (!R) return pvPos.get(id) || null; const dd: any = R.getNodeDisplayData(id); if (!dd || dd.hidden) return null; const p = R.framedGraphToViewport({ x: dd.x, y: dd.y }); return { x: p.x, y: p.y, r: R.scaleSize(dd.size) }; };
     const active = state.hovered || state.selected;
     // rings
     const ringIds = new Set<string>([...TOPB]); if (active) ringIds.add(active);
@@ -216,6 +260,7 @@ async function main() {
     for (const n of d.nodes) if (n.isTarget && g.hasNode(n.id)) { const p = vp(n.id); if (p) placed.push([p.x - p.r, p.y - p.r, p.x + p.r, p.y + p.r]); }
     const ovl = (bx: number[]) => placed.reduce((a, b) => a + Math.max(0, Math.min(bx[2], b[2]) - Math.max(bx[0], b[0])) * Math.max(0, Math.min(bx[3], b[3]) - Math.max(bx[1], b[1])), 0);
     const draws: [string, number, number, number, boolean, string][] = [];
+    const leaders: [number, number, number, number][] = [];
     for (const L of labelPlan()) {
       const p = vp(L.id); if (!p) continue;
       octx.font = `${L.weight} ${fs}px ${FONT}`;
@@ -233,12 +278,30 @@ async function main() {
         }
         if (done) break;
       }
+      // guaranteed labels that collide: try positions further out, joined to the node by a leader line
+      if (!done && L.force && !L.dim) {
+        const text = L.texts[L.texts.length > 1 && narrowMQ.matches ? L.texts.length - 1 : 0]; const tw = octx.measureText(text).width;
+        outer: for (const k of [1.6, 2.4, 3.3]) for (let j = 0; j < 12; j++) {
+          const a = (Math.PI * 2 * j) / 12, dist = p.r + th * k;
+          const cx = p.x + Math.cos(a) * dist, cy = p.y + Math.sin(a) * dist;
+          const x = Math.cos(a) > 0.3 ? cx : Math.cos(a) < -0.3 ? cx - tw : cx - tw / 2, y = cy + th * 0.35;
+          const box = [x - 3, y - th, x + tw + 3, y + 4];
+          if (box[0] < 2 || box[2] > w - 2 || box[1] < 2 || box[3] > h - 2) continue;
+          if (ovl(box) === 0) {
+            placed.push(box as any); draws.push([text, x, y, L.weight, false, L.id]);
+            leaders.push([p.x + Math.cos(a) * (p.r + 1), p.y + Math.sin(a) * (p.r + 1), Math.min(Math.max(p.x, box[0] + 3), box[2] - 3), Math.min(Math.max(p.y, box[1] + 2), box[3] - 2)]);
+            done = true; break outer;
+          }
+        }
+      }
       if (!done && L.force && best) {
         const [, x, y, text] = best; const tw = octx.measureText(text).width;
         placed.push([x - 3, y - th, x + tw + 3, y + 4]); draws.push([text, x, y, L.weight, !!L.dim, L.id]);
       }
     }
     (window as any).__labels = draws.map((x) => x[5]);
+    octx.lineWidth = 1; octx.strokeStyle = '#444';
+    for (const [x1, y1, x2, y2] of leaders) { octx.beginPath(); octx.moveTo(x1, y1); octx.lineTo(x2, y2); octx.stroke(); }
     // labels sit above lines: a white backing box under each label
     for (const [text, x, y, wgt, dim] of draws) {
       octx.font = `${wgt} ${fs}px ${FONT}`; const tw = octx.measureText(text).width;
@@ -247,45 +310,60 @@ async function main() {
       octx.strokeText(text, x, y); octx.fillStyle = dim ? '#6b6b6b' : '#111'; octx.fillText(text, x, y);
     }
   }
-  renderer.on('afterRender', drawOverlay);
-  new ResizeObserver(() => { sizeOverlay(); renderer.refresh(); }).observe(container);
+  new ResizeObserver(() => { sizeOverlay(); refresh(); }).observe(container);
 
   // ---------- camera ----------
-  const cam = renderer.getCamera();
+  let cam: ReturnType<Sigma['getCamera']> | null = null;
   function setFrame() {
     if (narrowMQ.matches && !state.showAll) {
       const core = d.nodes.filter((n) => g.hasNode(n.id) && !n.leaf);
       const xs = core.map((n) => n.x), ys = core.map((n) => n.y);
-      renderer.setCustomBBox({ x: [Math.min(...xs), Math.max(...xs)], y: [Math.min(...ys), Math.max(...ys)] });
-    } else renderer.setCustomBBox(null);
+      bbox = { x: [Math.min(...xs), Math.max(...xs)], y: [Math.min(...ys), Math.max(...ys)] };
+    } else bbox = null;
+    if (renderer) renderer.setCustomBBox(bbox);
   }
   const HOME = { x: 0.5, y: 0.5, ratio: 1, angle: 0 };
   const home = () => ({ ...HOME, angle: narrowMQ.matches && !state.showAll ? Math.PI / 2 : 0 });   // portrait screens: turn the wide layout upright
-  setFrame(); cam.setState(home());
-  const goHome = () => cam.animate(home(), { duration: 300 });
-  $('#zin').onclick = () => cam.animatedZoom({ duration: 250 });
-  $('#zout').onclick = () => cam.animatedUnzoom({ duration: 250 });
+  setFrame();
+  const goHome = () => { if (cam) cam.animate(home(), { duration: 300 }); else refresh(); };
+  $('#zin').onclick = () => { ensureSigma(); cam!.animatedZoom({ duration: 250 }); };
+  $('#zout').onclick = () => { ensureSigma(); cam!.animatedUnzoom({ duration: 250 }); };
   $('#zreset').onclick = goHome;
   function flyTo(id: string) {
     if (!g.hasNode(id)) return;
-    const p = renderer.getNodeDisplayData(id); if (!p) return;
-    cam.animate({ x: p.x, y: p.y, ratio: Math.min(cam.ratio, 0.6), angle: cam.angle }, { duration: 450 });
+    ensureSigma();
+    const p = renderer!.getNodeDisplayData(id); if (!p) return;
+    cam!.animate({ x: p.x, y: p.y, ratio: Math.min(cam!.ratio, 0.6), angle: cam!.angle }, { duration: 450 });
   }
 
   // ---------- tooltip (pointer devices only) ----------
   const tip = $('#tooltip');
   const hideTip = () => { tip.hidden = true; };
-  renderer.on('enterNode', ({ node, event }) => {
+  function ensureSigma() {
+    if (renderer) return;
+    renderer = new Sigma(g, container, SETTINGS);
+    renderer.setCustomBBox(bbox);
+    cam = renderer.getCamera(); cam.setState(home());
+    container.appendChild(overlay);   // keep the label layer above sigma's canvases
+    preview.remove();
+    renderer.on('afterRender', drawOverlay);
+    renderer.on('enterNode', onEnter); renderer.on('leaveNode', onLeave);
+    renderer.on('clickNode', ({ node }) => { hideTip(); state.hovered = null; select(node, stackMQ.matches); });
+    renderer.on('clickStage', () => { hideTip(); if (state.selected) select(null); });
+    renderer.refresh();
+  }
+  const wake = () => ensureSigma();
+  for (const ev of ['pointerdown', 'keydown', 'wheel', 'touchstart', 'focusin']) document.addEventListener(ev, wake, { capture: true, once: true, passive: true });
+  for (const ev of ['pointermove', 'pointerover']) container.addEventListener(ev, wake, { once: true, passive: true });
+  function onEnter({ node, event }: { node: string; event: { x: number; y: number } }) {
     if (!hoverMQ.matches) return;
-    state.hovered = node; recompute(); renderer.refresh({ skipIndexation: true });
+    state.hovered = node; recompute(); refresh({ skipIndexation: true });
     const n = byId.get(node)!;
     tip.innerHTML = `<strong>${esc(n.name)}</strong><span>${esc(n.type)}${n.race ? ' · ' + esc(n.race) : ''}</span><span>${n.outDeg ? `Endorses ${n.outDeg}` : ''}${n.outDeg && n.inDeg ? ' · ' : ''}${n.inDeg ? `Endorsed by ${n.inDeg}` : ''}</span>`;
     tip.hidden = false; const w = container.clientWidth; tip.style.left = Math.min(event.x + 14, w - 230) + 'px'; tip.style.top = event.y + 14 + 'px';
     container.style.cursor = 'pointer';
-  });
-  renderer.on('leaveNode', () => { if (!state.hovered) return; state.hovered = null; recompute(); renderer.refresh({ skipIndexation: true }); hideTip(); container.style.cursor = ''; });
-  renderer.on('clickNode', ({ node }) => { hideTip(); state.hovered = null; select(node, stackMQ.matches); });
-  renderer.on('clickStage', () => { hideTip(); if (state.selected) select(null); });
+  }
+  function onLeave() { if (!state.hovered) return; state.hovered = null; recompute(); refresh({ skipIndexation: true }); hideTip(); container.style.cursor = ''; }
   container.addEventListener('touchstart', hideTip, { passive: true });
 
   // ---------- panel helpers ----------
@@ -301,7 +379,9 @@ async function main() {
     return ds.size === 1 ? [...ds][0] : null;
   }
   function sourcesHtml(e: GEdge, oneDate: string | null) {
-    return `<span class="srcs">${e.src.map((x) => {
+    const seenL = new Set<string>();
+    const src = e.src.filter((x) => { const k = `${srcLabel(d.urls[x.u])}|${x.pg || ''}`; if (seenL.has(k)) return false; seenL.add(k); return true; });
+    return `<span class="srcs">${src.map((x) => {
       const u = d.urls[x.u];
       const acc = !oneDate && x.at ? ` <span class="acc">(${esc(fmtDate(x.at))})</span>` : '';
       return `<span><a href="${esc(srcHref(u, x.pg))}" target="_blank" rel="noopener" title="${esc(x.ty || '')}">${esc(srcLabel(u))}${x.pg ? `, p. ${esc(x.pg)}` : ''}<span aria-hidden="true"> ↗</span></a>${x.pr ? ' <span class="prim">primary</span>' : ''}${x.sh ? ' <span class="acc">(screenshot archived)</span>' : ''}${acc}</span>`;
@@ -335,12 +415,22 @@ async function main() {
       return `<h4>${typeGlyph(t)}${esc(t)} <span class="cnt">${list.length}</span></h4><ul class="elist">${rows}</ul>${more}`;
     }).join('');
   }
+  /** closest partners of a candidate: the top 3 with all endorsements plus the top ones without the probable ones (max 4) */
+  function closest(id: string) {
+    const ps = d.coTargets.filter((t) => t !== id).map((t) => ({ t, p: ix.together(id, t), pConf: togetherConf(id, t) }));
+    const a = ps.slice().sort((x, y) => y.p - x.p).slice(0, 3), b = ps.slice().sort((x, y) => y.pConf - x.pConf).slice(0, 3);
+    const out: typeof ps = [];
+    for (const x of [...a, ...b]) if (!out.some((o) => o.t === x.t) && out.length < 4) out.push(x);
+    return out.filter((x) => Math.max(x.p, x.pConf) > 0);
+  }
+  const togetherConf = (a: string, b: string) => (a === b ? 1 : d.pairTogetherConf[`${a}|${b}`] ?? d.pairTogetherConf[`${b}|${a}`] ?? 0);
   function placement(n: GNode) {
     if (isCand(n)) {
-      if (n.community >= 0) { const c = d.communities[n.community]; return `${chip(n.community)} In coalition <strong>${esc(LETTERS[c.id])} (${esc(blocName(ix, c))})</strong>: its candidates land together in ${pairPct(c.mean, c.meanConf, T)} of runs${c.borderline ? ' (borderline)' : ''}.`; }
+      if (n.community >= 0) { const c = d.communities[n.community]; return `${chip(n.community)} In coalition <strong>${esc(LETTERS[c.id])} (${esc(blocName(ix, c))})</strong>. Weakest pair: ${weakPct(d, c)}, ${marginLabel(d, c)}.`; }
       const l = d.loose.find((x) => x.id === n.id);
       if (l) {
-        return `${chip(-1)} In no coalition. Lands most often with ${listJoin(l.partners.slice(0, 3).map((p) => `${esc(N(p.t).name)} (${pairPct(p.p, p.pConf, T)})`))}.${l.groupedIn.length ? ` Joins ${listJoin(l.groupedIn.map((v) => listJoin(v.members.filter((x) => x !== n.id).map((x) => esc(surname(N(x)))))))} in some checks, but not all.` : ''}`;
+        const nmiss = nearMisses(d).find((x) => x.l.id === n.id);
+        return `${chip(-1)} In no coalition.${nmiss ? ` Falls just short of ${LETTERS[nmiss.c]}: weakest pair ${pctCut(nmiss.v, T)}.` : ''} Lands most often with ${listJoin(closest(n.id).map((p) => `${esc(N(p.t).name)} (${pairPct(p.p, p.pConf, T)})`))}.${closest(n.id).some((p) => pairPct(p.p, p.pConf, T).includes('–')) ? ' <span class="muted">Ranges: with and without the probable endorsements.</span>' : ''}`;
       }
       return n.memberOf ? `${chip(n.community)} No endorsers of their own; placed by the slate link${n.community >= 0 ? ` (coalition ${LETTERS[n.community]})` : ''}.` : `${chip(-1)} No endorsements recorded.`;
     }
@@ -356,14 +446,26 @@ async function main() {
     }
     if (!b) return '';
     const sure = (ok: boolean) => (ok ? '<span class="ok">holds up</span>' : '<span class="unsure">less certain</span>');
-    return `<p class="metric">Backs candidates in <strong>${b.reach} of ${nCamps(d)} coalitions</strong> · rank #${b.rankReach}${b.tie ? ' (tie)' : ''}${b.rankReachConf != null && b.rankReachConf !== b.rankReach ? ` (#${b.rankReachConf} excluding probable endorsements)` : ''} · ${sure(b.robustReach)} (top ${K} in ${pct(b.topReach)} of resamples${b.looWorst ? `; worst rank after removing any one endorsement: #${b.looWorst}` : ''})</p>${b.rankBc ? `<p class="metric small">Betweenness rank #${b.rankBc}${b.rankBcConf != null && b.rankBcConf !== b.rankBc ? ` (#${b.rankBcConf} excluding probable endorsements)` : ''} · ${sure(b.robustBc)} (top ${K} in ${pct(b.topBc)} of resamples${b.bcLooWorst ? `; worst after one removal: #${b.bcLooWorst}` : ''})${b.bcLooOut?.length ? `. Without its endorsement of ${esc(d.nodes.find((x) => x.id === b.bcLooOut![0].t)!.name)} it would rank ${b.bcLooOut[0].rank ? '#' + b.bcLooOut[0].rank : 'below every other endorser'}` : ''}.</p>` : ''}`;
+    const why = (r: [boolean, string][]) => { const f = r.filter((x) => x[0]).map((x) => x[1]); return f.length ? `; but it ${listJoin(f)}` : ''; };
+    const bcWhy = b.robustBc ? '' : why([
+      [b.topBc < 0.8, `is top ${K} in only ${pct(b.topBc)} of resamples`],
+      [(b.bcLooWorst ?? 1e6) > K, `falls to ${b.bcLooWorst ? '#' + b.bcLooWorst : 'zero'} when one endorsement is removed`],
+      [(b.rankBcConf ?? 1e6) > K, `ranks ${b.rankBcConf ? '#' + b.rankBcConf : 'nowhere'} without the probable endorsements`],
+      [(b.bcLooWorstConf ?? 1e6) > K && (b.rankBcConf ?? 1e6) <= K, `falls to ${b.bcLooWorstConf ? '#' + b.bcLooWorstConf : 'zero'} when the probable endorsements and one other endorsement are removed`],
+    ]);
+    const reachWhy = b.robustReach ? '' : why([
+      [b.topReach < 0.8, `is top ${K} in only ${pct(b.topReach)} of resamples`],
+      [(b.looWorst ?? 1e6) > K, `falls to ${b.looWorst ? '#' + b.looWorst : 'one coalition'} when one endorsement is removed`],
+      [(b.rankReachConf ?? 1e6) > K, `ranks #${b.rankReachConf} without the probable endorsements`],
+    ]);
+    return `<p class="metric">Backs candidates in <strong>${b.reach} of ${nCamps(d)} coalitions</strong> · rank #${b.rankReach}${b.tie ? ' (tie)' : ''}${b.rankReachConf != null && b.rankReachConf !== b.rankReach ? ` (#${b.rankReachConf} excluding probable endorsements)` : ''} · ${sure(b.robustReach)} (top ${K} in ${pct(b.topReach)} of resamples${b.looWorst ? `; worst rank after removing any one endorsement: #${b.looWorst}` : ''}${reachWhy}).</p>${b.rankBc ? `<p class="metric small">Betweenness rank #${b.rankBc}${b.rankBcConf != null && b.rankBcConf !== b.rankBc ? ` (#${b.rankBcConf} excluding probable endorsements)` : ''} · ${sure(b.robustBc)} (top ${K} in ${pct(b.topBc)} of resamples${b.bcLooWorst ? `; worst after one removal: #${b.bcLooWorst}` : ''}${bcWhy})${b.bcLooOut?.length ? `. Without its endorsement of ${esc(d.nodes.find((x) => x.id === b.bcLooOut![0].t)!.name)} it would rank ${b.bcLooOut[0].rank ? '#' + b.bcLooOut[0].rank : 'below every other endorser'}` : ''}.</p>` : ''}`;
   }
   function nodePanel(id: string) {
     const n = N(id);
     const outs = edgesOut.get(id) || []; const ins = edgesIn.get(id) || [];
     const struct = memberEdges.filter((e) => e.s === id || e.t === id);
     const oneDate = panelDates([...outs, ...ins, ...struct]);
-    const tkey = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const tkey = (t: string) => t.toLowerCase().replace(/\bd-?(\d+)\b/g, 'district $1').replace(/\b(city|of|the)\b/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
     const titles: string[] = [];
     const words = (t: string) => tkey(t).split(' ');
     const covered = (t: string) => titles.some((x) => { const kw = new Set(words(x)); const w = words(t); return w.filter((y) => kw.has(y)).length >= 0.75 * w.length; });
@@ -395,17 +497,17 @@ async function main() {
   function coalitionsPanel() {
     const items = d.communities.map((c) => {
       const pairs: string[] = [];
-      for (let i = 0; i < c.targets.length; i++) for (let j = i + 1; j < c.targets.length; j++) pairs.push(`<li>${esc(shortName(N(c.targets[i])))} & ${esc(shortName(N(c.targets[j])))}: <strong>${pct(ix.together(c.targets[i], c.targets[j]))}</strong></li>`);
+      for (let i = 0; i < c.targets.length; i++) for (let j = i + 1; j < c.targets.length; j++) pairs.push(`<li>${esc(shortName(N(c.targets[i])))} & ${esc(shortName(N(c.targets[j])))}: <strong>${pairPct(ix.together(c.targets[i], c.targets[j]), togetherConf(c.targets[i], c.targets[j]), T)}</strong></li>`);
       return `<li class="coal"><div class="coal-h">${chip(c.id)}<strong>${esc(blocName(ix, c))}</strong></div>
         <p class="coal-c">${c.targets.map((t) => `${nlink(N(t))} <span class="race-tag">${esc(raceShort(N(t).race))}</span>`).join(', ')}</p>
-        <p class="small">Together in ${pairPct(c.mean, c.meanConf, T)} of runs${c.borderline ? `. <strong>Borderline</strong>: ${esc(shortName(N(c.weakest.a)))} & ${esc(shortName(N(c.weakest.b)))} ${pct(c.weakest.p)}` : ''}.</p>
+        <p class="small">Weakest pair ${esc(shortName(N(c.weakest.a)))} & ${esc(shortName(N(c.weakest.b)))}: <strong>${weakPct(d, c)}</strong>, ${marginLabel(d, c)}</p>
         ${pairs.length > 1 ? `<details class="pairs"><summary>All ${pairs.length} pairs</summary><ul>${pairs.join('')}</ul></details>` : ''}
         ${Object.keys(c.typeCounts).length ? typeBar(c.typeCounts) : ''}</li>`;
     }).join('');
-    const loose = d.loose.map((l) => `<li>${nlink(N(l.id), undefined, 'strong')} <span class="race-tag">${esc(raceShort(N(l.id).race))}</span><br><span class="small">Closest: ${listJoin(l.partners.slice(0, 2).map((p) => `${esc(shortName(N(p.t)))} (${pairPct(p.p, p.pConf, T)})`))}</span></li>`).join('');
+    const loose = d.loose.map((l) => `<li>${nlink(N(l.id), undefined, 'strong')} <span class="race-tag">${esc(raceShort(N(l.id).race))}</span><br><span class="small">${(() => { const nm = nearMisses(d).find((x) => x.l.id === l.id); return nm ? `Just short of ${LETTERS[nm.c]}: ${pctCut(nm.v, T)}` : `Closest: ${listJoin(closest(l.id).slice(0, 2).map((p) => `${esc(shortName(N(p.t)))} (${pairPct(p.p, p.pConf, T)})`))}`; })()}</span></li>`).join('');
     const allTypes = [...new Set(d.communities.flatMap((c) => Object.keys(c.typeCounts)))];
     return `<h2 class="ph">${numWord(S.nBlocs).replace(/^./, (x) => x.toUpperCase())} ${plural(S.nBlocs, 'coalition')}</h2>
-      <p class="pintro">Candidates who land in the same cluster in at least ${pct(T)} of ${S.nRuns.toLocaleString('en-US')} runs. Bars show their endorsers by type.</p>
+      <p class="pintro">Every pair lands together in ≥${pct(T)} of ${S.nRuns.toLocaleString('en-US')} runs, with or without the probable endorsements. Thin margin: weakest pair under ${pct(T + (S.border ?? 0.05))}. Ranges: with and without the probable endorsements. Bars: endorsers by type.</p>
       <ol class="coals">${items}</ol>${typeKey(allTypes)}
       <h3>No coalition <span class="cnt">${d.loose.length + isolated.length}</span></h3><ul class="loose">${loose}${isolated.map((n) => `<li>${nlink(n, undefined, 'strong')} <span class="race-tag">${esc(raceShort(n.race))}</span><br><span class="small">No endorsements recorded</span></li>`).join('')}</ul>`;
   }
@@ -443,7 +545,7 @@ async function main() {
       : mode === 'reach' ? `<p class="small">How many of the ${numWord(nCamps(d))} coalitions an endorser’s picks land in. Ties share a rank. Bars: picks by coalition; white = no coalition.</p>`
         : '<p class="small">How often an endorser lies on the shortest chain of endorsements between two others.</p>';
     return `<h2 class="ph">Who spans the coalitions</h2>
-      <p class="pintro">“Holds up”: stays in the top ${K} when endorsements are deleted at random, one at a time, or when the probable ones are left out.</p>
+      <p class="pintro">Holds up: stays in the top ${K} when endorsements are dropped at random, one at a time, or the probable ones are left out.</p>
       <div class="seg" role="group" aria-label="Ranking"><button data-bsort="reach" aria-pressed="${mode === 'reach'}">Coalitions reached</button><button data-bsort="bc" aria-pressed="${mode === 'bc'}">Betweenness</button><button data-bsort="cand" aria-pressed="${mode === 'cand'}">Candidates</button></div>
       ${expl}<ol class="bridges">${rows}</ol>`;
   }
@@ -509,7 +611,7 @@ async function main() {
   // ---------- interactions ----------
   function select(id: string | null, fly = true) {
     const had = state.selected;
-    state.selected = id; recompute(); renderer.refresh({ skipIndexation: true }); renderPanel(); syncHash();
+    state.selected = id; recompute(); refresh({ skipIndexation: true }); renderPanel(); syncHash();
     if (id && fly) { if (stackMQ.matches) setTimeout(() => flyTo(id), 260); else flyTo(id); }
     if (!id && had) goHome();
   }
@@ -518,7 +620,7 @@ async function main() {
     state.view = v; state.selected = null;
     tabs.forEach((b) => { const on = b.dataset.view === v; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; });
     panel.setAttribute('aria-labelledby', `tab-${v}`);
-    recompute(); renderer.refresh({ skipIndexation: true }); renderPanel(); renderLegend(); syncHash();
+    recompute(); refresh({ skipIndexation: true }); renderPanel(); renderLegend(); syncHash();
   }
   tabs.forEach((b) => {
     b.addEventListener('click', () => { setView(b.dataset.view as View); goHome(); });
@@ -537,15 +639,15 @@ async function main() {
       select(id); return;
     }
     if (t.closest('[data-back]')) { select(null); return; }
-    const rb = t.closest<HTMLElement>('[data-race]'); if (rb) { state.race = rb.dataset.race!; recompute(); renderer.refresh({ skipIndexation: true }); renderPanel(); syncHash(); return; }
-    const bs = t.closest<HTMLElement>('[data-bsort]'); if (bs) { state.bmode = bs.dataset.bsort as BMode; recompute(); renderer.refresh({ skipIndexation: true }); renderPanel(); renderLegend(); syncHash(); return; }
+    const rb = t.closest<HTMLElement>('[data-race]'); if (rb) { state.race = rb.dataset.race!; recompute(); refresh({ skipIndexation: true }); renderPanel(); syncHash(); return; }
+    const bs = t.closest<HTMLElement>('[data-bsort]'); if (bs) { state.bmode = bs.dataset.bsort as BMode; recompute(); refresh({ skipIndexation: true }); renderPanel(); renderLegend(); syncHash(); return; }
     const sm = t.closest<HTMLButtonElement>('.showmore');
     if (sm) { sm.previousElementSibling?.querySelectorAll('li.more').forEach((li) => ((li as HTMLElement).hidden = false)); sm.remove(); }
   });
-  $<HTMLInputElement>('#showall').addEventListener('change', (e) => { state.showAll = (e.target as HTMLInputElement).checked; setFrame(); cam.setState(home()); recompute(); renderer.refresh(); renderLegend(); });
-  $<HTMLSelectElement>('#colorby').addEventListener('change', (e) => { state.colorBy = (e.target as HTMLSelectElement).value as any; renderer.refresh({ skipIndexation: true }); renderLegend(); });
+  $<HTMLInputElement>('#showall').addEventListener('change', (e) => { state.showAll = (e.target as HTMLInputElement).checked; setFrame(); cam?.setState(home()); recompute(); refresh(); renderLegend(); });
+  $<HTMLSelectElement>('#colorby').addEventListener('change', (e) => { state.colorBy = (e.target as HTMLSelectElement).value as any; refresh({ skipIndexation: true }); renderLegend(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.selected) select(null); });
-  narrowMQ.addEventListener('change', () => { setFrame(); cam.setState(home()); recompute(); renderer.refresh(); renderLegend(); });
+  narrowMQ.addEventListener('change', () => { setFrame(); cam?.setState(home()); recompute(); refresh(); renderLegend(); });
 
   // ---------- search (ARIA combobox) ----------
   const q = $<HTMLInputElement>('#q'); const qres = $('#qres');
@@ -599,10 +701,11 @@ async function main() {
   }
   window.addEventListener('popstate', applyHash);
 
-  ($('#legendbox') as HTMLDetailsElement).open = !narrowMQ.matches;
+  ($('#legendbox') as HTMLDetailsElement).open = window.innerWidth >= 1280;   // collapsed below 1280 px so it never covers the graph
   await tick(); applyHash();
   (window as any).__test = {
-    pos: (id: string) => { const dd: any = renderer.getNodeDisplayData(id); return dd ? renderer.framedGraphToViewport({ x: dd.x, y: dd.y }) : null; },
+    pos: (id: string) => { if (!renderer) { const p = pvPos.get(id); return p ? { x: p.x, y: p.y } : null; } const dd: any = renderer.getNodeDisplayData(id); return dd ? renderer.framedGraphToViewport({ x: dd.x, y: dd.y }) : null; },
+    sigma: () => !!renderer,
     byName: (n: string) => ix.byName.get(n)?.id, state,
     cands: () => d.nodes.filter((n) => n.isTarget && g.hasNode(n.id)).map((n) => n.id),
     leaf: (id: string) => !!byId.get(id)?.leaf,

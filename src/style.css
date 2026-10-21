@@ -271,7 +271,8 @@ body.app{display:flex;flex-direction:column;height:100dvh;overflow:hidden;font-f
   .appbar{padding:6px 10px;gap:6px}
   .appbar>.ab-row:first-child{width:100%}
   .apptitle{font-size:15px}
-  .apptitle .kick{font-size:12px}
+  .apptitle .kick{font-size:11px;letter-spacing:.04em}
+  .hide-n{display:none}
   .ab-tools{width:100%;flex-wrap:nowrap}
   .ab-tools .search{flex:1 1 auto;max-width:none}
   .ab-tools .select{font-size:13px;white-space:nowrap}
@@ -298,3 +299,5 @@ body.app{display:flex;flex-direction:column;height:100dvh;overflow:hidden;font-f
 .findings a.nlink{text-decoration:none;color:inherit}
 .mlist li{margin-bottom:8px}
 .downloads{list-style:none;padding:0}
+.svg-narrow svg{max-width:480px;margin:0 auto}
+#graph .preview{position:absolute;inset:0;pointer-events:none}

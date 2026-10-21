@@ -12,9 +12,10 @@ Analysis (all on the undirected, unweighted projection):
   * "core" graph = drop endorsers who endorse exactly one candidate/slate and nothing else
     (degree-1 leaves cannot lie on a shortest path between other nodes, and they only inflate
     hub scores), and drop isolated candidates.
-  * Louvain on the core graph: 5 independent batches x 1,000 runs, node and edge order shuffled
-    per run. Pair co-assignment per batch; complete linkage at 0.75 per batch; a coalition is
-    reported only if every batch puts its candidates in the same group (meet of the partitions).
+  * Louvain on the core graph: 2 independent sets of 20,000 runs, node and edge order shuffled
+    per run, each with and without the Probable edges. Pair co-assignment per set; complete linkage
+    at 0.75 (every pair together in >= 75% of runs); a coalition = candidates that stay together in
+    all four partitions (meet of the partitions).
     Leaves inherit the community of their single neighbour.
   * Betweenness centrality (exact, normalized) on the core graph.
   * Endorser overlap between every pair of candidates (count + Jaccard).
@@ -265,15 +266,16 @@ def coassign(M, cols):
         out[i] = (sub == sub[:, [i]]).mean(0)
     return out
 def avg_linkage(ids, P_, th):
-    """average-linkage agglomerative clustering on a co-assignment matrix, cut at th:
-    keep merging the two clusters with the highest mean cross-pair co-assignment while that mean is >= th.
+    """complete-linkage agglomerative clustering on a co-assignment matrix, cut at th:
+    keep merging the two clusters whose weakest cross pair is highest, while that weakest pair is >= th
+    (so every pair inside a group lands together in >= th of runs).
     Deterministic given the matrix. Returns (groups, merge values, first refused merge value)."""
     cl = [[i] for i in range(len(ids))]; merges = []; refused = None
     while len(cl) > 1:
         bm = None
         for a_ in range(len(cl)):
             for b_ in range(a_ + 1, len(cl)):
-                v = float(np.mean([P_[x, y] for x in cl[a_] for y in cl[b_]]))
+                v = float(min(P_[x, y] for x in cl[a_] for y in cl[b_]))
                 if bm is None or v > bm[0] + 1e-12: bm = (v, a_, b_)
         if bm[0] < th: refused = (bm[0], frozenset(ids[x] for x in cl[bm[1]] + cl[bm[2]])); break
         merges.append((bm[0], frozenset(ids[x] for x in cl[bm[1]] + cl[bm[2]])))
@@ -314,9 +316,17 @@ def together_min(a, b): return min(together(a, b), together_conf(a, b))
 # every partition (2 pools x with/without probable edges); a coalition is reported only if ALL of them contain it
 variant_parts = {f'{k}{i}': [c for c in AN[k]['parts'][i][0]] for k in ('all', 'conf') for i in range(len(SEED_BASES))}
 pools_agree = {k: {c for c in AN[k]['parts'][0][0] if len(c) > 1} == {c for c in AN[k]['parts'][1][0] if len(c) > 1} for k in ('all', 'conf')}
+# ONE rule for membership and for the margin flag: complete linkage on the pairwise MINIMUM of the with- and
+# without-Probable co-assignment matrices, so every pair inside a coalition lands together in >= ROBUST of runs
+# whether or not the probable endorsements are counted.
+P_min = np.minimum(P_pool, P_conf)
+min_part = avg_linkage(targets_core, P_min, ROBUST)
 meet = {}
-for t in targets_core:
-    meet.setdefault(tuple(next(i for i, c in enumerate(vp) if t in c) for vp in variant_parts.values()), []).append(t)
+for gi_, c in enumerate(min_part[0]):
+    meet[gi_] = sorted(c, key=nm)
+# robustness: the same rule applied to each 20,000-run set separately
+pool_min_parts = [{c for c in avg_linkage(targets_core, np.minimum(AN['all']['Ps'][i], AN['conf']['Ps'][i]), ROBUST)[0] if len(c) > 1} for i in range(len(SEED_BASES))]
+pools_min_agree = all(pp == {c for c in min_part[0] if len(c) > 1} for pp in pool_min_parts)
 bloc_list = [sorted(g_, key=nm) for g_ in meet.values() if len(g_) >= 2]
 def endorsers_of_set(ts):
     out_ = set()
@@ -324,6 +334,7 @@ def endorsers_of_set(ts):
     return out_
 bloc_list.sort(key=lambda c: (-len(endorsers_of_set(c)), min(nm(x) for x in c)))
 final_sets = {frozenset(c) for c in bloc_list}
+min_refused = dict(set=sorted(min_part[2][1], key=nm), v=round(min_part[2][0], 4)) if min_part[2] else None
 loose = sorted([g_[0] for g_ in meet.values() if len(g_) == 1], key=lambda n: -D.in_degree(n))
 # groupings that appear in some partitions but not all: reported as such, never as coalitions
 def mean_p(Pm, grp): 
@@ -401,6 +412,11 @@ for t in loose:
     loose_meta.append(dict(id=t, best=round(max(p_[0] for p_ in ps), 3) if ps else 0, bestConf=round(max(p_[1] for p_ in ps), 3) if ps else 0,
                            partners=[dict(t=o, p=v, pConf=vc) for v, vc, o in ps if max(v, vc) >= top - 0.01 or max(v, vc) >= ROBUST - BORDER][:6],
                            groupedIn=[dict(members=v_['members'], where=v_['where']) for v_ in variants_meta if t in v_['members']]))
+    # nearest coalition under the membership rule (weakest pair with its candidates), with and without Probable edges
+    if bloc_list:
+        cand_ = [(bi, min(together(t, o) for o in c), min(together_conf(t, o) for o in c)) for bi, c in enumerate(bloc_list)]
+        bi, ma, mc = max(cand_, key=lambda x: max(x[1], x[2]))
+        loose_meta[-1].update(nearBloc=bi, nearMin=round(ma, 4), nearMinConf=round(mc, 4))
 
 # ---------- betweenness + "spanning" endorsers ----------
 bc_core = nx.betweenness_centrality(core, normalized=True)
@@ -437,7 +453,7 @@ rank_reach, rr0 = reach_ranks(base_outs, tgrp)
 rank_bc = rank_competition(cand_bridge, lambda n: (-round(bc_core.get(n, 0), 9), nm(n)))
 end_edges = [(e['s'], e['t']) for e in edges if e['kind'] == 'endorsement']
 mem_edges = [(e['s'], e['t']) for e in edges if e['kind'] == 'member']
-BOOT = 200; BOOT_RUNS = 100; TOPK = 10
+BOOT = 200; BOOT_RUNS = 200; TOPK = 10
 def boot_rep(seed):
     """drop 10% of endorsements, re-cluster from scratch (BOOT_RUNS shuffled Louvain runs), recount coalitions reached"""
     rng_ = random.Random(1_000_003 * (seed + 1))
@@ -449,16 +465,33 @@ def boot_rep(seed):
     M = np.array([louvain_shuffled((nl, el, seed * 10_000 + k))[0] for k in range(BOOT_RUNS)])
     tg = [t for t in targets_core if t in ixx]
     Pb = coassign(M, [ixx[t] for t in tg])
+    if prob_edges:   # same rule as the main analysis: pairwise minimum of with / without the probable endorsements
+        G2 = nx.Graph(); G2.add_nodes_from(nodes); G2.add_edges_from([e_ for e_ in keep if e_ not in prob_edges]); G2.add_edges_from(mem_edges)
+        dg2 = dict(G2.degree()); lv2 = {x for x in G2 if dg2[x] == 1 and not is_ctarget(x) and not nodes[x].get('isTarget')}
+        Gc2 = G2.subgraph([x for x in G2 if x not in lv2 and dg2[x] > 0]).copy()
+        nl2 = sorted(Gc2.nodes()); el2 = sorted(tuple(sorted(e_)) for e_ in Gc2.edges()); ix2 = {x: i for i, x in enumerate(nl2)}
+        M2 = np.array([louvain_shuffled((nl2, el2, seed * 10_000 + 5_000 + k))[0] for k in range(BOOT_RUNS)])
+        tg = [t for t in tg if t in ix2]
+        Pb = np.minimum(coassign(M, [ixx[t] for t in tg]), coassign(M2, [ix2[t] for t in tg]))
     groups = [c for c in avg_linkage(tg, Pb, ROBUST)[0] if len(c) >= 2]
     grp = {t: gi for gi, c in enumerate(groups) for t in c}
     om = collections.defaultdict(list)
     for s_, t_ in keep: om[s_].append(t_)
     rk, rr = reach_ranks({n: om.get(n, []) for n in cand_bridge}, grp)
-    return [n for n in cand_bridge if rk[n] <= TOPK and rr[n][0] >= 2], len(groups)
+    fate = []   # for each reported coalition: 'intact' (same candidates together, nobody added), or the group(s) its members end up in
+    for c in bloc_list:
+        cs = [t for t in c if t in grp or t in ixx]
+        gids = {grp.get(t, -1) for t in cs}
+        if len(gids) == 1 and -1 not in gids and set(groups[next(iter(gids))]) == set(cs): fate.append('intact')
+        elif len(gids) == 1 and -1 not in gids: fate.append('joined:' + '|'.join(sorted(set(groups[next(iter(gids))]) - set(cs))))
+        else: fate.append('split')
+    return [n for n in cand_bridge if rk[n] <= TOPK and rr[n][0] >= 2], len(groups), fate
 with Pool(min(8, os.cpu_count() or 1)) as pool:
     boot = pool.map(boot_rep, range(BOOT), chunksize=4)
-top_reach = collections.Counter(n for b_, _ in boot for n in b_)
-boot_ngroups = collections.Counter(k_ for _, k_ in boot)
+top_reach = collections.Counter(n for b_, _, _ in boot for n in b_)
+boot_ngroups = collections.Counter(k_ for _, k_, _ in boot)
+boot_fate = [dict(collections.Counter(f_[bi] for _, _, f_ in boot)) for bi in range(len(bloc_list))]
+boot_intact_all = sum(all(x == 'intact' for x in f_) for _, _, f_ in boot)
 rng = random.Random(20261103)
 top_bc = collections.Counter()
 for bi_ in range(100):   # betweenness: 100 edge resamples (no clustering involved)
@@ -692,10 +725,10 @@ summary = dict(
     nNodes=len(nodes), nEndorsers=n_end, nSingle=single,
     nCandidates=len([n for n in cand_names if n != SLATE]),
     nCore=core.number_of_nodes(), nCoreEdges=core.number_of_edges(),
-    runs=POOL, pools=len(SEED_BASES), nRuns=R, border=BORDER, linkage='average', poolsAgree=pools_agree,
+    runs=POOL, pools=len(SEED_BASES), nRuns=R, border=BORDER, linkage='complete', poolsAgree=pools_agree, poolsMinAgree=pools_min_agree, minRefused=dict(set=[nm(x) for x in min_refused['set']], v=min_refused['v']) if min_refused else None,
     variantPartitions={k_: sorted([sorted(nm(x) for x in c) for c in vp if len(c) >= 2]) for k_, vp in variant_parts.items()},
     refusedMerges={k_: [dict(set=[nm(x) for x in r_['set']], v=r_['v']) if r_ else None for r_ in v_] for k_, v_ in refusals.items()},
-    bootGroups={str(k): v for k, v in sorted(boot_ngroups.items())},
+    bootGroups={str(k): v for k, v in sorted(boot_ngroups.items())}, bootFate=boot_fate, bootIntactAll=boot_intact_all,
     nCommunitiesDistribution={str(k): v for k, v in sorted(n_comm_dist.items())},
     relCounts=dict(collections.Counter(e['rel'] for e in edges if e['kind'] == 'endorsement')),
     typeCounts=dict(collections.Counter(nodes[n]['type'] for n in nodes)),
@@ -815,6 +848,14 @@ type_fix = {nodes[o['id']]['name']: o['now'] for o in type_overrides}
 for f in os.listdir(args.out):
     if f != 'graph.json': os.remove(os.path.join(args.out, f))
 copied = []; published_tables = {}; zero_dropped = 0; zero_cand = zero_pamph = zero_other = 0
+import zipfile as _zf
+_zp = os.path.join(C, 'source_snapshots.zip')
+ZIP_NAMES = set(_zf.ZipFile(_zp).namelist()) if allowed('source_snapshots.zip') and os.path.exists(_zp) else set()
+def zip_path(v):
+    """snapshot paths as stored in source_snapshots.zip; captures not in the archive get no path (their sha256 is kept)"""
+    if not v: return v
+    q = v[4:] if v.startswith('raw/') else v
+    return q if q in ZIP_NAMES else ''
 for base, cols_allowed in ALLOW.items():
     p_ = os.path.join(C, base + '.csv')
     if not allowed(base + '.csv') or not os.path.exists(p_): continue
@@ -823,6 +864,7 @@ for base, cols_allowed in ALLOW.items():
     seen_r = set(); body = []
     for r in rows:
         rr = {k: clean_text(r.get(k, '')) for k in hk}
+        if 'snapshot_path' in rr: rr['snapshot_path'] = zip_path(rr['snapshot_path'])
         if base == 'candidates' and curly(rr.get('Candidate')) in pub_cand_notes and 'Notes' in rr: rr['Notes'] = pub_cand_notes[curly(rr['Candidate'])]
         if 'Endorser type' in rr and curly(rr.get('Endorser')) in type_fix: rr['Endorser type'] = type_fix[curly(rr['Endorser'])]
         if base == 'endorsers' and (r.get('Candidates endorsed (count)') or '').strip() in ('0', ''):

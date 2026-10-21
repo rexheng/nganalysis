@@ -41,6 +41,8 @@ with sync_playwright() as p:
           graph_share_of_viewport: Math.round(100*gb.width*gb.height/(innerWidth*innerHeight))/100,
           forbidden: ['.findings','#heatmap','#overlap','.methods','.overview','.dek','.downloads'].filter(s=>document.querySelector(s)),
           story_link: (document.querySelector('.storylink')||{}).getAttribute?.('href'),
+          legend_open: document.getElementById('legendbox').open, credit_line: !!document.querySelector('.credit'),
+          sigma_before_interaction: window.__test.sigma(), preview_canvas: !!document.querySelector('#graph .preview'),
           words_outside_panel: (()=>{const cl=document.body.cloneNode(true); cl.querySelectorAll('#sheet,#legendbox,.sr,script,noscript,#tooltip,#qres').forEach(e=>e.remove()); return cl.innerText.split(/\\s+/).filter(Boolean).length})()}})()""")
         pg.screenshot(path=f'{OUT}/{name}-landing.png')
         for view in ['coalitions', 'bridges', 'race']:
@@ -96,7 +98,10 @@ with sync_playwright() as p:
            hscroll: document.documentElement.scrollWidth > innerWidth, h1: document.querySelector('h1').textContent,
            node_links: [...document.querySelectorAll('a.nlink')].length, bad_node_links: [...document.querySelectorAll('a.nlink')].filter(a=>!/^\\/\\?node=/.test(a.getAttribute('href'))).length,
            heatmap_region: (()=>{const h=document.getElementById('heatmap');return {tabindex:h.getAttribute('tabindex'),role:h.getAttribute('role'),label:h.getAttribute('aria-label')}})(),
-           zero_cells: [...document.querySelectorAll('#overlap td[data-a]')].filter(t=>t.textContent.trim()==='0').length}))()""")
+           zero_cells: [...document.querySelectorAll('#overlap td[data-a]')].filter(t=>t.textContent.trim()==='0').length,
+           jaccard_on_page: /jaccard|combined lists|either list/i.test(document.body.innerText),
+           findings_words: (()=>{const a=document.querySelector('.story').cloneNode(true); return a.innerText.split(/\s+/).filter(Boolean).length})(),
+           heatmap_toggle: (()=>{const cell=()=>([...document.querySelectorAll('#heatmap td[title]')].find(t=>/^Avery Arbaugh & Vylma Ortiz/.test(t.title))||{}).title; const a=cell(); document.querySelector('[data-hm=conf]').click(); const b=cell(); document.querySelector('[data-hm=all]').click(); return [a,b]})()}))()""")
         pg.screenshot(path=f'{OUT}/{name}-findings-top.png'); pg.screenshot(path=f'{OUT}/{name}-findings-full.png', full_page=True)
         cell = pg.locator('#overlap td[data-a]').nth(3); cell.scroll_into_view_if_needed(); pg.wait_for_timeout(200)
         if mob: cell.tap()
