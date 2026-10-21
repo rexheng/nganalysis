@@ -1,60 +1,88 @@
-"""Headless verification: screenshots of each view at desktop+mobile, console errors, node click panel."""
-import sys, json, re, os
+"""Headless verification of a deployed URL.
+Screenshots of each view at 1440/1280/768/390, console errors, real canvas click/tap on a node, search,
+mobile behaviours (no sticky tooltip, no auto-scroll, camera reset), deep links, and the URL format of every source.
+Usage: python scripts/verify.py <url> <outdir>"""
+import sys, json, os, re, urllib.request
+from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
 URL = sys.argv[1]; OUT = sys.argv[2] if len(sys.argv) > 2 else '/workspace/endorsement-graph/shots'
 os.makedirs(OUT, exist_ok=True)
-VPS = {'desktop': (1440, 900), 'mobile': (390, 844)}
+VPS = {'d1440': (1440, 900, False), 'd1280': (1280, 800, False), 't768': (768, 1024, True), 'm390': (390, 844, True)}
 report = {'url': URL, 'errors': {}, 'checks': {}}
+# data checks (no browser)
+g = json.load(urllib.request.urlopen(URL.rstrip('/') + '/data/graph.json'))
+bad = [u for u in g['urls'] if urlparse(u).scheme not in ('http', 'https') or not urlparse(u).netloc or ' ' in u]
+no_src = [e['id'] for e in g['edges'] if not e['src']]
+report['checks']['sources'] = {'distinct_urls': len(g['urls']), 'bad_format': bad, 'edges': len(g['edges']), 'edges_without_source': no_src}
+leaks = {}
+for f, _ in g['summary'].get('downloads', []):
+    body = urllib.request.urlopen(URL.rstrip('/') + '/data/' + f).read()
+    if f.endswith(('.csv', '.md', '.json')):
+        t = body.decode('utf-8', 'replace'); leaks[f] = bool(re.search(r'\bRex\b|internal_notes|by the editor', t))
+    elif f.endswith('.xlsx'):
+        import zipfile, io
+        z = zipfile.ZipFile(io.BytesIO(body)); t = ''.join(z.read(n).decode('utf-8', 'replace') for n in z.namelist() if n.endswith('.xml'))
+        leaks[f] = bool(re.search(r'\bRex\b|internal_notes|by the editor', t))
+report['checks']['download_leaks'] = leaks
 with sync_playwright() as p:
-    b = p.chromium.launch()
-    for name, (w, h) in VPS.items():
-        ctx = b.new_context(viewport={'width': w, 'height': h}, device_scale_factor=2 if name == 'mobile' else 1, is_mobile=name == 'mobile', has_touch=name == 'mobile')
+    b = p.chromium.launch(args=['--use-gl=swiftshader', '--enable-webgl', '--ignore-gpu-blocklist'])
+    for name, (w, h, mob) in VPS.items():
+        ctx = b.new_context(viewport={'width': w, 'height': h}, device_scale_factor=2 if mob else 1, is_mobile=mob, has_touch=mob)
         pg = ctx.new_page(); errs = []
-        pg.on('console', lambda m: errs.append(f'{m.type}: {m.text}') if m.type in ('error', 'warning') else None)
+        pg.on('console', lambda m: errs.append(f'{m.type}: {m.text}') if m.type == 'error' else None)
         pg.on('pageerror', lambda e: errs.append(f'pageerror: {e}'))
         pg.on('requestfailed', lambda r: errs.append(f'requestfailed: {r.url}'))
-        pg.goto(URL, wait_until='networkidle'); pg.wait_for_function('window.__ready === true', timeout=20000)
-        pg.wait_for_timeout(600)
+        pg.goto(URL, wait_until='networkidle'); pg.wait_for_function('window.__ready === true', timeout=20000); pg.wait_for_timeout(600)
+        c = report['checks'].setdefault(name, {})
+        c['overview_top'] = pg.evaluate("document.querySelector('.ov-art').getBoundingClientRect().top")
+        c['hscroll'] = pg.evaluate("document.documentElement.scrollWidth > window.innerWidth")
         pg.screenshot(path=f'{OUT}/{name}-top.png')
         pg.screenshot(path=f'{OUT}/{name}-fullpage.png', full_page=True)
+        ex = lambda: (pg.evaluate("document.getElementById('explore').scrollIntoView()"), pg.wait_for_timeout(350))
         for view in ['coalitions', 'bridges', 'race']:
-            pg.click(f'[data-view={view}]'); pg.wait_for_timeout(500)
-            pg.locator('#explore').scroll_into_view_if_needed(); pg.evaluate("document.getElementById('explore').scrollIntoView()"); pg.wait_for_timeout(300)
+            pg.click(f'[data-view={view}]'); pg.wait_for_timeout(500); ex()
             pg.screenshot(path=f'{OUT}/{name}-{view}.png')
-            if name == 'mobile':
-                pg.locator('#panel').screenshot(path=f'{OUT}/{name}-{view}-panel.png')
-        # node click: real mouse/touch on canvas at the node's viewport position
-        pg.click('[data-view=coalitions]'); pg.wait_for_timeout(300)
-        pg.evaluate("document.getElementById('explore').scrollIntoView()"); pg.wait_for_timeout(300)
-        nid = pg.evaluate("window.__test.byName('Jenny Wong')")
-        pos = pg.evaluate(f"window.__test.pos('{nid}')")
-        box = pg.locator('#graph').bounding_box()
+            if mob: pg.locator('#panel').screenshot(path=f'{OUT}/{name}-{view}-panel.png')
+        c['default_race'] = pg.evaluate("document.querySelector('[data-race][aria-pressed=true]').dataset.race")
+        pg.click('[data-view=bridges]'); pg.wait_for_timeout(300)
+        for s in ['bc', 'cand', 'reach']:
+            pg.click(f'[data-bsort={s}]'); pg.wait_for_timeout(400); ex(); pg.screenshot(path=f'{OUT}/{name}-bridges-{s}.png')
+        # canvas click / tap
+        pg.click('[data-view=coalitions]'); pg.wait_for_timeout(300); ex()
+        cam0 = pg.evaluate("JSON.stringify(window.__test.state)")
+        nid = pg.evaluate("window.__test.byName('Igor A. Tregub')")
+        pos = pg.evaluate(f"window.__test.pos('{nid}')"); box = pg.locator('#graph').bounding_box()
         x, y = box['x'] + pos['x'], box['y'] + pos['y']
-        if name == 'mobile': pg.touchscreen.tap(x, y)
+        y0 = pg.evaluate('window.scrollY')
+        if mob: pg.touchscreen.tap(x, y)
         else: pg.mouse.move(x, y); pg.wait_for_timeout(200); pg.mouse.click(x, y)
         pg.wait_for_timeout(900)
-        h3 = pg.locator('#panel h3').first.inner_text()
-        nlinks = pg.locator('#panel .srcs a').count()
-        report['checks'][f'{name}-click'] = {'clicked': 'Jenny Wong', 'panel_h3': h3, 'source_links_in_panel': nlinks, 'hash': pg.evaluate('location.hash')}
-        pg.evaluate("document.getElementById('explore').scrollIntoView()"); pg.wait_for_timeout(300)
+        c['click'] = {'clicked': 'Igor A. Tregub', 'panel_h3': pg.locator('#panel h3').first.inner_text(), 'source_links': pg.locator('#panel .srcs a').count(),
+                      'tooltip_hidden': pg.evaluate("document.getElementById('tooltip').hidden"), 'scrolled_px': pg.evaluate('window.scrollY') - y0,
+                      'pill_visible': pg.evaluate("!document.getElementById('pill').hidden")}
         pg.screenshot(path=f'{OUT}/{name}-node-click.png')
-        if name == 'mobile': pg.locator('#panel').screenshot(path=f'{OUT}/{name}-node-click-panel.png')
-        # search
-        pg.mouse.move(2, 2) if name == 'desktop' else None
-        pg.fill('#q', 'Karen W'); pg.wait_for_timeout(200); pg.keyboard.press('Enter'); pg.wait_for_timeout(900)
-        report['checks'][f'{name}-search'] = pg.locator('#panel h3').first.inner_text()
-        pg.evaluate("document.getElementById('explore').scrollIntoView()"); pg.wait_for_timeout(300)
-        pg.screenshot(path=f'{OUT}/{name}-search-select.png')
-        pg.fill('#q', 'Right to Housing'); pg.wait_for_timeout(200); pg.keyboard.press('Enter'); pg.wait_for_timeout(900)
-        report['checks'][f'{name}-slate'] = pg.locator('#panel h3').first.inner_text()
-        pg.evaluate("document.getElementById('explore').scrollIntoView()"); pg.wait_for_timeout(300)
-        pg.screenshot(path=f'{OUT}/{name}-slate-select.png')
-        # show all toggle
-        pg.keyboard.press('Escape'); pg.check('#showall'); pg.wait_for_timeout(400)
-        pg.screenshot(path=f'{OUT}/{name}-showall.png'); pg.uncheck('#showall')
+        if mob: pg.locator('#panel').screenshot(path=f'{OUT}/{name}-node-click-panel.png')
+        pg.keyboard.press('Escape'); pg.wait_for_timeout(600)
+        c['deselect_selected'] = pg.evaluate('window.__test.state.selected')
+        # search (combobox)
+        if not mob: pg.mouse.move(2, 2)
+        pg.fill('#q', 'Green Party'); pg.wait_for_timeout(200)
+        c['combobox_expanded'] = pg.get_attribute('#q', 'aria-expanded')
+        pg.keyboard.press('Enter'); pg.wait_for_timeout(900)
+        c['search'] = pg.locator('#panel h3').first.inner_text(); c['primary_tags'] = pg.locator('#panel .prim').count()
+        ex(); pg.screenshot(path=f'{OUT}/{name}-search-select.png')
+        pg.keyboard.press('Escape'); pg.wait_for_timeout(400)
+        pg.check('#showall'); pg.wait_for_timeout(400); ex(); pg.screenshot(path=f'{OUT}/{name}-showall.png'); pg.uncheck('#showall')
+        pg.select_option('#colorby', 'type'); pg.wait_for_timeout(400); ex(); pg.screenshot(path=f'{OUT}/{name}-colorby-type.png'); pg.select_option('#colorby', 'community')
+        pg.locator('#heatmap').screenshot(path=f'{OUT}/{name}-heatmap.png')
         pg.locator('.overlap-sec').screenshot(path=f'{OUT}/{name}-overlap.png')
-        pg.locator('.methods').screenshot(path=f'{OUT}/{name}-methods.png')
+        pg.locator('.overview').screenshot(path=f'{OUT}/{name}-overview.png')
+        if name in ('d1440', 'm390'): pg.locator('.methods').screenshot(path=f'{OUT}/{name}-methods.png')
+        # deep link
+        pg.goto(URL + f'#view=bridges&node={nid}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(700)
+        c['deeplink'] = pg.locator('#panel h3').first.inner_text()
         report['errors'][name] = errs
         ctx.close()
     b.close()
+json.dump(report, open(f'{OUT}/verify_report.json', 'w'), indent=1)
 print(json.dumps(report, indent=1))

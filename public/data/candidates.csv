@@ -1,25 +1,25 @@
 candidate_id,Candidate,Race,Status,Campaign URL,Endorsements page,Endorsement count,Notes
-N516003,Jenny Wong,Auditor,On ballot,https://www.jennyforauditor.com,https://www.jennyforauditor.com/endorsements,105,Page says partial list
-N856639,Daria Wrubel,Council D1,On ballot,https://www.dariaforberkeley.com,https://www.dariaforberkeley.com/endorsements,70,Ranked notes #1/#2 on page
-N334194,Laura Babitt,Council D1,On ballot,https://www.laura4d1.com,https://www.laura4d1.com/endorsements,14,"#1 CHOICE block (firefighters, LCV East Bay)"
-N240570,Moni Gangopadhyay,Council D1,On ballot,https://www.moniforberkeley.com,https://www.moniforberkeley.com/endorsements,24,Wix layout jumbled; some name/title pairings uncertain; #2 org ranks
-N920588,Ross Bernet,Council D1,On ballot,https://www.rossforberkeley.com,https://www.rossforberkeley.com/endorsements,62,Ranked notes #1/#2
-N046515,Steve Kromer,Council D1,On ballot,,,0,"No campaign endorsements: per Berkeley Scanner (https://www.berkeleyscanner.com/2026/09/24/elections/berkeley-city-council-candidate-steve-kromer/) he ""did not seek these endorsements""; Rex doc: website lists none. Pamphlet item 10 has 5 referees. Campaign URL not identified"
-N716433,Igor A. Tregub,Council D4,On ballot,https://www.igortregub.com,https://www.igortregub.com/endorsements,214,Large list; some names appear in multiple sections; title/name split heuristic
-N564658,"Majdi ""Gaith"" Abuhamdieh",Council D4,On ballot,https://majdiforberkeley.com,https://majdiforberkeley.com/endorsements/,16,JS SPA; endorsements extracted from site JS bundle
-N785201,Aidan Hill,Council D7,On ballot,https://aidanhill.vote,https://aidanhill.vote/endorse,13,
-N791421,Syrak Micael,Council D7,On ballot,https://www.syrakforsouthside.com,https://www.syrakforsouthside.com/endorsements,74,Also listed as endorser on rent board slate page; Alameda County Green Party (#2)
-N790917,Fred M. Feller,Council D8,Withdrawn (on ballot),https://www.fredfellerforcouncil.com,,0,Withdrawn (still on ballot). His site endorses Wallman #1 and Mendonca #2. https://www.fredfellerforcouncil.com
-N552689,Mari Mendonca,Council D8,On ballot,https://electmarimendonca.com,https://electmarimendonca.com/endorsements/,19,Fred Feller recommends Mendonca #2 (fredfellerforcouncil.com).
-N310030,Mark Humbert,Council D8,On ballot,https://www.humbertforcouncil.com,https://www.humbertforcouncil.com/#Endorsements,78,Endorsements are anchor section of homepage
-N144309,Michael Wallman,Council D8,On ballot,https://www.wallmandistrict8.com,https://www.wallmandistrict8.com/endorse,61,Pamphlet item 10 = None. Fred Feller (withdrawn D8 candidate) recommends Wallman #1 per fredfellerforcouncil.com.
-N584646,Avery Arbaugh,Rent Board,On ballot,https://berkeleyrentboard.com/,https://berkeleyrentboard.com/endorsements/,2,Member of Berkeley Right to Housing slate (see slate_members.csv). Endorsers backing all 5 members are linked to the slate node; partial endorsements link here.
-S000001,Berkeley Right to Housing slate,Rent Board,Slate,https://berkeleyrentboard.com/,https://berkeleyrentboard.com/endorsements/,29,"Slate node. Members: Vylma Ortiz, Avery Arbaugh, Derek Rodriguez, Ida Martinac, Nathan Mizell. Nominated by the Berkeley Tenants Convention."
-N475957,Carole Marasovic,Rent Board,On ballot,https://www.caroleforrentboard.com,https://www.caroleforrentboard.com,28,"Endorsements on homepage; ""and more!"""
-N700277,Derek Rodriguez,Rent Board,On ballot,https://berkeleyrentboard.com/,https://berkeleyrentboard.com/endorsements/,0,Member of Berkeley Right to Housing slate (see slate_members.csv). Endorsers backing all 5 members are linked to the slate node; partial endorsements link here.
-N158454,Ida Martinac,Rent Board,On ballot,https://berkeleyrentboard.com/,https://berkeleyrentboard.com/endorsements/,2,Member of Berkeley Right to Housing slate (see slate_members.csv). Endorsers backing all 5 members are linked to the slate node; partial endorsements link here.
-N580676,Nathan Mizell,Rent Board,On ballot,https://berkeleyrentboard.com/,https://berkeleyrentboard.com/endorsements/,2,Member of Berkeley Right to Housing slate (see slate_members.csv). Endorsers backing all 5 members are linked to the slate node; partial endorsements link here.
-N803637,Vylma Ortiz,Rent Board,On ballot,https://berkeleyrentboard.com/,https://berkeleyrentboard.com/endorsements/,1,Member of Berkeley Right to Housing slate (see slate_members.csv). Endorsers backing all 5 members are linked to the slate node; partial endorsements link here.
-N019944,Jennifer Shanoski,School Board,On ballot,https://shanoski4berkeley.nationbuilder.com,https://shanoski4berkeley.nationbuilder.com/endorsements,74,"Rex doc says no campaign website, but her pamphlet statement cites this NationBuilder site, which has an endorsements page (scraped)"
-N196791,Ka'Dijah Brown,School Board,On ballot,,,3,"No campaign website found. Endorsed on org pages (Wellstone, BDC, ACDP)."
+N516003,Jenny Wong,Auditor,On ballot,https://www.jennyforauditor.com,https://www.jennyforauditor.com/endorsements,107,The campaign page describes its list as partial.
+N856639,Daria Wrubel,Council D1,On ballot,https://www.dariaforberkeley.com,https://www.dariaforberkeley.com/endorsements,70,
+N334194,Laura Babitt,Council D1,On ballot,https://www.laura4d1.com,https://www.laura4d1.com/endorsements,15,
+N240570,Moni Gangopadhyay,Council D1,On ballot,https://www.moniforberkeley.com,https://www.moniforberkeley.com/endorsements,24,
+N920588,Ross Bernet,Council D1,On ballot,https://www.rossforberkeley.com,https://www.rossforberkeley.com/endorsements,62,
+N046515,Steve Kromer,Council D1,On ballot,,,0,No endorsements recorded.
+N716433,Igor A. Tregub,Council D4,On ballot,https://www.igortregub.com,https://www.igortregub.com/endorsements,214,
+N564658,"Majdi ""Gaith"" Abuhamdieh",Council D4,On ballot,https://majdiforberkeley.com,https://majdiforberkeley.com/endorsements/,16,
+N785201,Aidan Hill,Council D7,On ballot,https://aidanhill.vote,https://aidanhill.vote/endorse,14,
+N791421,Syrak Micael,Council D7,On ballot,https://www.syrakforsouthside.com,https://www.syrakforsouthside.com/endorsements,75,
+N790917,Fred M. Feller,Council D8,Withdrawn (on ballot),https://www.fredfellerforcouncil.com,,0,Withdrawn from the race; still on the ballot. No endorsements recorded.
+N552689,Mari Mendonca,Council D8,On ballot,https://electmarimendonca.com,https://electmarimendonca.com/endorsements/,21,
+N310030,Mark Humbert,Council D8,On ballot,https://www.humbertforcouncil.com,https://www.humbertforcouncil.com/#Endorsements,78,
+N144309,Michael Wallman,Council D8,On ballot,https://www.wallmandistrict8.com,https://www.wallmandistrict8.com/endorse,61,
+N584646,Avery Arbaugh,Rent Board,On ballot,https://berkeleyrentboard.com/,https://berkeleyrentboard.com/endorsements/,2,Member of the Berkeley Right to Housing slate.
+S000001,Berkeley Right to Housing slate,Rent Board,Slate,https://berkeleyrentboard.com/,https://berkeleyrentboard.com/endorsements/,30,Shared page for the slate’s 5 candidates. Endorsers listed for the whole slate link here; endorsements of individual members link to that member.
+N475957,Carole Marasovic,Rent Board,On ballot,https://www.caroleforrentboard.com,https://www.caroleforrentboard.com,28,
+N700277,Derek Rodriguez,Rent Board,On ballot,https://berkeleyrentboard.com/,https://berkeleyrentboard.com/endorsements/,0,Member of the Berkeley Right to Housing slate. No endorsements recorded.
+N158454,Ida Martinac,Rent Board,On ballot,https://berkeleyrentboard.com/,https://berkeleyrentboard.com/endorsements/,2,Member of the Berkeley Right to Housing slate.
+N580676,Nathan Mizell,Rent Board,On ballot,https://berkeleyrentboard.com/,https://berkeleyrentboard.com/endorsements/,2,Member of the Berkeley Right to Housing slate.
+N803637,Vylma Ortiz,Rent Board,On ballot,https://berkeleyrentboard.com/,https://berkeleyrentboard.com/endorsements/,1,Member of the Berkeley Right to Housing slate.
+N019944,Jennifer Shanoski,School Board,On ballot,https://shanoski4berkeley.nationbuilder.com,https://shanoski4berkeley.nationbuilder.com/endorsements,76,Endorsements come from the campaign site cited in the candidate’s voter guide statement.
+N196791,Ka'Dijah Brown,School Board,On ballot,,,4,No campaign website found; endorsements come from organization pages.
 N095313,Sandy Park,School Board,On ballot,https://www.sandyparkforberkeley.com,https://www.sandyparkforberkeley.com/endorse,74,
