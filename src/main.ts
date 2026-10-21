@@ -8,7 +8,7 @@ import type { Data, GNode, GEdge, Bridge } from './types';
 import {
   commColor, commName, LETTERS, esc, index, bridgeSentence, listJoin, numWord, chip, nlink, typeGlyph, TYPE_ORDER, TYPE_RAMP,
   blocName, campOf, nCamps, pct, raceShort, srcLabel, srcHref, shortName, surname, robustBridges, pairPct, onColor, plural, pctCut, weakPct, marginLabel, nearMisses,
-  intactRange, intactNote,
+  intactRange, intactNote, intactWords,
 } from './text';
 const isProb = (e: { conf?: string }) => /probable/i.test(e.conf || '');
 
@@ -21,7 +21,7 @@ const norm = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').t
 const narrowMQ = window.matchMedia('(max-width: 640px)');
 const stackMQ = window.matchMedia('(max-width: 899px)');
 const hoverMQ = window.matchMedia('(hover: hover) and (pointer: fine)');
-const midMQ = window.matchMedia('(min-width: 1024px) and (max-width: 1279px)');   // ring names only on hover or focus here
+const midMQ = window.matchMedia('(max-width: 1279px)');   // below 1280 px, ring names show only on hover, focus or tap
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -327,6 +327,7 @@ async function main() {
   }
   const HOME = { x: 0.5, y: 0.5, ratio: 1, angle: 0 };
   // portrait screens: turn the wide layout upright, and lift it so its top sits just under the legend button (no dead band above)
+  let homeBottom = 0;
   let homeMemo: { k: string; v: { x: number; y: number; ratio: number; angle: number } } | null = null;
   const home = () => {
     const base = { ...HOME, angle: narrowMQ.matches && !state.showAll ? Math.PI / 2 : 0 };
@@ -334,13 +335,23 @@ async function main() {
     const w = container.clientWidth, h = container.clientHeight; if (!w || !h) return base;
     const k = `${w}x${h}`; if (homeMemo && homeMemo.k === k) return homeMemo.v;
     const ext = bbox || graphExtent(g); const normF = createNormalizationFunction(ext);
-    const pts: { x: number; y: number }[] = []; g.forEachNode((_id, a) => { pts.push(normF({ x: a.x, y: a.y }) as any); });
+    const pts: { x: number; y: number }[] = []; g.forEachNode((id, a) => { if (!(SETTINGS.nodeReducer(id, a) as any).hidden) pts.push(normF({ x: a.x, y: a.y }) as any); });
     const dims = { width: ext.x[1] - ext.x[0] || 1, height: ext.y[1] - ext.y[0] || 1 };
-    const topY = (c: typeof base) => { const M = matrixFromCamera(c, { width: w, height: h }, dims, SETTINGS.stagePadding); let m = Infinity; for (const p of pts) { const v = multiplyVec2(M, p as any); m = Math.min(m, ((1 - v.y) * h) / 2); } return m; };
-    const TARGET = 56, eps = 0.01;
-    const t0 = topY(base), gx = (topY({ ...base, x: base.x + eps }) - t0) / eps, gy = (topY({ ...base, y: base.y + eps }) - t0) / eps;
-    let v = base;
-    if (t0 > TARGET + 4) { if (Math.abs(gx) > Math.abs(gy) && gx) v = { ...base, x: base.x + (TARGET - t0) / gx }; else if (gy) v = { ...base, y: base.y + (TARGET - t0) / gy }; }
+    const box = (c: typeof base) => { const M = matrixFromCamera(c, { width: w, height: h }, dims, SETTINGS.stagePadding); let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity; for (const p of pts) { const q = multiplyVec2(M, p as any); const X = ((1 + q.x) * w) / 2, Y = ((1 - q.y) * h) / 2; x0 = Math.min(x0, X); x1 = Math.max(x1, X); y0 = Math.min(y0, Y); y1 = Math.max(y1, Y); } return { x0, x1, y0, y1 }; };
+    // fit: zoom so the visible nodes fill the width (room for labels at the sides) or the height between the legend button and the zoom buttons
+    const TOP = 56, BOTTOM = 64, SIDE = 44;
+    const b0 = box(base); const sc = Math.min((w - 2 * SIDE) / Math.max(1, b0.x1 - b0.x0), (h - TOP - BOTTOM) / Math.max(1, b0.y1 - b0.y0));
+    let v = { ...base, ratio: base.ratio / Math.max(0.5, Math.min(3, sc)) };
+    // then pan (2×2 finite-difference solve) so the box is centred horizontally with its top at TOP
+    for (let it = 0; it < 2; it++) {
+      const b1 = box(v), eps = 0.002 * v.ratio;
+      const f = (bb: ReturnType<typeof box>) => [(bb.x0 + bb.x1) / 2 - w / 2, bb.y0 - TOP];
+      const f0 = f(b1), fx = f(box({ ...v, x: v.x + eps })), fy = f(box({ ...v, y: v.y + eps }));
+      const J = [[(fx[0] - f0[0]) / eps, (fy[0] - f0[0]) / eps], [(fx[1] - f0[1]) / eps, (fy[1] - f0[1]) / eps]];
+      const det = J[0][0] * J[1][1] - J[0][1] * J[1][0]; if (Math.abs(det) < 1e-9) break;
+      v = { ...v, x: v.x - (J[1][1] * f0[0] - J[0][1] * f0[1]) / det, y: v.y - (-J[1][0] * f0[0] + J[0][0] * f0[1]) / det };
+    }
+    homeBottom = box(v).y1;
     homeMemo = { k, v }; return v;
   };
   setFrame();
@@ -519,7 +530,7 @@ async function main() {
       for (let i = 0; i < c.targets.length; i++) for (let j = i + 1; j < c.targets.length; j++) pairs.push(`<li>${esc(shortName(N(c.targets[i])))} & ${esc(shortName(N(c.targets[j])))}: <strong>${pairPct(ix.together(c.targets[i], c.targets[j]), togetherConf(c.targets[i], c.targets[j]), T)}</strong></li>`);
       return `<li class="coal"><div class="coal-h">${chip(c.id)}<strong>${esc(blocName(ix, c))}</strong></div>
         <p class="coal-c">${c.targets.map((t) => `${nlink(N(t))} <span class="race-tag">${esc(raceShort(N(t).race))}</span>`).join(', ')}</p>
-        <p class="small">Weakest pair ${esc(shortName(N(c.weakest.a)))} & ${esc(shortName(N(c.weakest.b)))}: <strong>${weakPct(d, c)}</strong>, ${marginLabel(d, c)}${intactRange(c) ? `. Intact in ${intactRange(c)} of tries${(() => { const nt = intactNote(d, ix, c); return nt ? ` (${esc(nt)})` : ''; })()}` : ''}</p>
+        <p class="small">Weakest pair ${esc(shortName(N(c.weakest.a)))} & ${esc(shortName(N(c.weakest.b)))}: <strong>${weakPct(d, c)}</strong>, ${marginLabel(d, c)}${intactWords(c, true) ? `. Intact in ${intactWords(c, true)}${(() => { const nt = intactNote(d, ix, c); return nt ? ` (${esc(nt)})` : ''; })()}` : ''}</p>
         ${pairs.length > 1 ? `<details class="pairs"><summary>All ${pairs.length} pairs</summary><ul>${pairs.join('')}</ul></details>` : ''}
         ${Object.keys(c.typeCounts).length ? typeBar(c.typeCounts) : ''}</li>`;
     }).join('');
@@ -663,13 +674,27 @@ async function main() {
     const sm = t.closest<HTMLButtonElement>('.showmore');
     if (sm) { sm.previousElementSibling?.querySelectorAll('li.more').forEach((li) => ((li as HTMLElement).hidden = false)); sm.remove(); }
   });
-  $<HTMLInputElement>('#showall').addEventListener('change', (e) => { state.showAll = (e.target as HTMLInputElement).checked; setFrame(); cam?.setState(home()); recompute(); refresh(); renderLegend(); });
+  $<HTMLInputElement>('#showall').addEventListener('change', (e) => { state.showAll = (e.target as HTMLInputElement).checked; setFrame(); fitSheet(); cam?.setState(home()); recompute(); refresh(); renderLegend(); });
   $<HTMLSelectElement>('#colorby').addEventListener('change', (e) => { state.colorBy = (e.target as HTMLSelectElement).value as any; refresh({ skipIndexation: true }); renderLegend(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.selected) select(null); });
   const setPeek = (ev: Event) => { const t = (ev.target as HTMLElement)?.closest?.<HTMLElement>('[data-node]'); const id = t && ev.type !== 'focusout' && ev.type !== 'mouseout' ? t.dataset.node! : null; if (id !== peek) { peek = id; drawOverlay(); } };
   for (const ev of ['focusin', 'focusout', 'mouseover', 'mouseout']) document.addEventListener(ev, setPeek, { passive: true });
   midMQ.addEventListener('change', () => drawOverlay());
-  narrowMQ.addEventListener('change', () => { setFrame(); cam?.setState(home()); recompute(); refresh(); renderLegend(); });
+  // portrait phones: the upright network is about as wide as it is tall, so it cannot fill the screen's height without
+  // cropping its sides. Give the leftover height to the bottom sheet, which then shows the panel (a peek) instead of empty canvas.
+  function fitSheet() {
+    const root = document.documentElement;
+    root.style.removeProperty('--peek'); sheet.classList.remove('peek'); homeMemo = null;
+    if (!narrowMQ.matches || state.showAll) return;
+    home(); const spare = container.clientHeight - (homeBottom + 64);
+    if (spare >= 120) { root.style.setProperty('--peek', `${Math.round(52 + spare)}px`); sheet.classList.add('peek'); }
+    homeMemo = null;
+    if (renderer) { renderer.resize(); cam?.setState(home()); }
+    refresh();
+  }
+  fitSheet();
+  let rsz = 0; window.addEventListener('resize', () => { cancelAnimationFrame(rsz); rsz = requestAnimationFrame(fitSheet); });
+  narrowMQ.addEventListener('change', () => { setFrame(); fitSheet(); cam?.setState(home()); recompute(); refresh(); renderLegend(); });
 
   // ---------- search (ARIA combobox) ----------
   const q = $<HTMLInputElement>('#q'); const qres = $('#qres');

@@ -160,7 +160,7 @@ def render(d, W, fs, narrow):
 def main(graph_json, outdir):
     d = json.load(open(graph_json, encoding='utf-8'))
     os.makedirs(outdir, exist_ok=True)
-    open(os.path.join(outdir, 'overview-wide.svg'), 'w', encoding='utf-8').write(render(d, 1000, 18, False))
+    open(os.path.join(outdir, 'overview-wide.svg'), 'w', encoding='utf-8').write(render(d, 1000, 19, False))
     open(os.path.join(outdir, 'overview-narrow.svg'), 'w', encoding='utf-8').write(render(d, 1000, 38, True))
 
 if __name__ == '__main__':

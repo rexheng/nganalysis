@@ -1,5 +1,5 @@
 """Headless verification of a deployed URL: the graph-only landing page (/) and the findings page (/findings/).
-Screenshots at 1440/1280/768/390, console errors, canvas click/tap, search, bottom sheet, labels, deep links (?node=),
+Screenshots at 1440/1024/800/390, console errors, canvas click/tap, search, bottom sheet, labels, deep links (?node=),
 overlap tooltips, axe on both pages, and the URL format of every source.
 Usage: python scripts/verify.py <url> <outdir>"""
 import sys, json, os, re, urllib.request, zipfile, io
@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
 URL = sys.argv[1].rstrip('/'); OUT = sys.argv[2] if len(sys.argv) > 2 else '/workspace/endorsement-graph/shots'
 os.makedirs(OUT, exist_ok=True)
-VPS = {'d1440': (1440, 900, False), 'd1280': (1280, 800, False), 't768': (768, 1024, True), 'm390': (390, 844, True)}
+VPS = {'d1440': (1440, 900, False), 'd1024': (1024, 768, False), 't800': (800, 900, True), 'm390': (390, 844, True)}
 report = {'url': URL, 'errors': {}, 'checks': {}}
 g = json.load(urllib.request.urlopen(URL + '/data/graph.json'))
 bad = [u for u in g['urls'] if urlparse(u).scheme not in ('http', 'https') or not urlparse(u).netloc or ' ' in u]
@@ -84,7 +84,7 @@ with sync_playwright() as p:
         pg.check('#showall'); pg.wait_for_timeout(400); pg.screenshot(path=f'{OUT}/{name}-showall.png'); pg.uncheck('#showall')
         pg.select_option('#colorby', 'type'); pg.wait_for_timeout(400); pg.screenshot(path=f'{OUT}/{name}-colorby-type.png'); pg.select_option('#colorby', 'community')
         if mob: pg.click('#legendbox summary'); pg.wait_for_timeout(200)
-        if name in ('d1440', 'm390'):
+        if True:   # axe at every width
             pg.add_script_tag(path='/tmp/axe-pkg/node_modules/axe-core/axe.min.js'); c['axe_landing'] = pg.evaluate(AXE)
         pg.goto(URL + f'/?node={nid}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(700)
         c['deeplink_query'] = pg.locator('#panel h2').first.inner_text()
@@ -112,7 +112,7 @@ with sync_playwright() as p:
         if mob: pg.locator('#ovtip .ovx').tap()
         else: pg.locator('#ovtip .ovx').click()
         pg.wait_for_timeout(200); f['ovtip_closed'] = pg.evaluate("document.getElementById('ovtip').hidden")
-        if name in ('d1440', 'm390'):
+        if True:   # axe at every width
             pg.add_script_tag(path='/tmp/axe-pkg/node_modules/axe-core/axe.min.js'); f['axe'] = pg.evaluate(AXE)
         # a findings name link opens the graph with that node selected
         href = pg.locator('a.nlink').first.get_attribute('href'); pg.goto(URL + href); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(500)

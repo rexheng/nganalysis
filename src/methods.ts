@@ -31,6 +31,7 @@ export function methodsHtml(d: Data): string {
     ...wd.map((n) => `${esc(n.name)} withdrew and counts only as an endorser.`)].filter(Boolean).join(' ');
   return `
 <h2 id="methods">Methods</h2>
+<p>We counted ${S.nEndorsementEdges.toLocaleString('en-US')} endorsements by ${S.nEndorsers} people and groups of ${d.nodes.filter((n) => n.isTarget && n.type !== 'Slate' && !n.analysisEndorser).length} candidates and ${numWord(d.nodes.filter((n) => n.isTarget && n.type === 'Slate').length)} ${plural(d.nodes.filter((n) => n.isTarget && n.type === 'Slate').length, 'slate')}.</p>
 <ul class="mlist">
 <li><strong>Endorsement:</strong> a name on a candidate’s endorsement page, on an organization’s own list or in a candidate statement in the <a href="${esc(vig)}" rel="noopener" target="_blank">county voter guide</a>, as of ${esc(prettyDate(S.accessDates[0]))}. Where an organization publishes its own list, that list is the source. Excluded: the guide’s “I refer to the following residents” lists${S.nUnverifiedLeads ? ` and ${S.nUnverifiedLeads} claims found only on aggregator sites` : ''}.</li>
 ${nProb ? `<li><strong>Probable:</strong> ${probWho}. ${notes.length === 1 ? esc(probNote(notes[0], probE.length > 1)) : ''} Every result is also computed without them; both graphics draw them in blue.</li>` : ''}

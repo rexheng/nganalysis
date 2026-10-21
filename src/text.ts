@@ -163,9 +163,22 @@ export function intactNote(d: Data, ix: Ix, c: Community) {
   const j = (c.joiners || [])[0];
   const sp = (c.split || 0) / B, jn = j ? j.n / B : 0;
   if (Math.max(sp, jn) < 0.25) return '';
-  if (jn >= sp && j) { const n = ix.byId.get(j.t)!; return `${n.type === 'Slate' ? 'the slate' : surname(n)} often joins`; }
+  if (sp > jn && (sp < 0.5 || (c.intact ?? 0) / B < 0.05)) return '';   // 'often splits' only when it adds to the survival figure
+  const jname = (t: string) => { const n = ix.byId.get(t)!; return n.type === 'Slate' ? 'the slate' : surname(n); };
+  const j2 = (c.joiners || [])[1];
+  if (jn >= sp && j) return `${jname(j.t)}${j2 && j2.n >= 0.5 * j.n ? ` or ${jname(j2.t)}` : ''} often joins`;
   return 'often splits';
 }
+/** survival in plain words (the 95% interval lives in METHODS.md): "about half the tries", "70%", "1 try in 10" */
+export function intactWords(c: Community, firstSmall: boolean) {
+  const B = c.boots || 0; if (!B || c.intact === undefined) return '';
+  const sh = c.intact / B, r = Math.round(sh * 100);
+  if (sh >= 0.45 && sh <= 0.55) return 'about half the tries';
+  if (sh >= 0.05 && sh < 0.25) return `1 ${firstSmall ? 'try ' : ''}in ${Math.round(1 / sh)}`;
+  return `${r}%`;
+}
+/** "55%" when the with/without-probable values round alike, else "up to 72%" */
+export const upTo = (p: number, pc: number) => (Math.round(p * 100) === Math.round(pc * 100) ? pct(p) : `up to ${pct(Math.max(p, pc))}`);
 /** shared endorsers between the slate and every other candidate, by raw count */
 export function slateShares(d: Data, ix: Ix) {
   const sl = ix.slate; if (!sl) return null;
@@ -207,21 +220,22 @@ export function buildTexts(d: Data): Texts {
     if (maj(a) && (aSure || !maj(b))) headline = `Most of the ${slRace} slate’s backers also back ${a.n.name}`;
     else if (maj(a) && maj(b)) headline = `Most of the ${slRace} slate’s backers also back ${a.n.name} and ${b.n.name}`;
     else if (aSure) headline = `The ${slRace} slate shares the most backers with ${a.n.name}`;
-    let p = `Of the ${sh.nS} backers of the ${nlink(sh.sl)}${slRace && !headline.includes(slRace) ? ` for ${esc(slRace)}` : ''}, ${listJoin(top3.map((r, i) => `${r.k}${i === 0 ? ' also back' : ''} ${nameRace(r.n)}`))}.`;
+    let p = `Of the ${nlink(sh.sl, 'slate’s')} ${sh.nS} backers, ${listJoin(top3.map((r, i) => `${r.k}${i === 0 ? ' also back' : ''} ${nlink(r.n)}`))}.`;
     const base = top3.map((r) => so?.council.find((c) => c.t === r.n.id));
     if (so && base.every((b) => b && b.base !== undefined)) {
       p += ` Among other multi-candidate endorsers, ${listJoin(top3.map((r, i) => `${pct(base[i]!.base ?? 0)}${i === 0 ? ' back' : ''} ${esc(surname(r.n))}`))}.`;
       // the candidate whose list is shortest yet most drawn from the slate's
       const rows = top3.map((r, i) => ({ r, c: base[i]! }));
       const g = rows.slice().sort((x, y) => x.c.nList - y.c.nList)[0];
-      if (g && g.r.k / g.c.nList >= 0.4 && rows.every((x) => x === g || x.c.nList > g.c.nList)) p += ` ${esc(surname(g.r.n))}’s list is short, but it is drawn heavily from the slate’s.`;
+      if (g && g.r.k * 2 > g.c.nList && rows.every((x) => x === g || x.c.nList > g.c.nList)) p += ` ${esc(surname(g.r.n))}’s list is short, but more than half of it, ${g.r.k} of ${g.c.nList}, overlaps the slate’s.`;
     }
     findings.push(p);
     // headline graphic: of the slate's backers, how many back each council candidate; tick = base rate
     if (so) {
       const rowsC = so.council.slice().sort((x, y) => y.n - x.n || N(x.t).name.localeCompare(N(y.t).name));
+      const hl = new Set(top3.filter((r) => headline.includes(r.n.name)).map((r) => r.n.id));   // bars for the candidates the headline names
       const W = (v: number) => `${((100 * v) / sh.nS).toFixed(2)}%`;
-      strip = `<figure class="strip" aria-labelledby="strip-cap"><div class="strip-rows" role="img" aria-label="${esc(rowsC.map((c) => `${N(c.t).name}: ${c.n} of ${sh.nS}; other endorsers ${pct(c.base ?? 0)}`).join('. '))}">${rowsC.map((c) => `<div class="srow" aria-hidden="true"><span class="sname">${esc(surname(N(c.t)))}</span><span class="sbar"><i style="width:${W(c.n)}"></i>${c.base !== undefined ? `<b style="left:${W(c.base * sh.nS)}"></b>` : ''}</span><span class="snum">${c.n}</span></div>`).join('')}</div><figcaption id="strip-cap">Slate backers per council candidate, of ${sh.nS}. Tick: other endorsers.</figcaption></figure>`;
+      strip = `<figure class="strip" aria-labelledby="strip-cap"><div class="strip-rows" role="img" aria-label="${esc(rowsC.map((c) => `${N(c.t).name}: ${c.n} of ${sh.nS}; other endorsers ${pct(c.base ?? 0)}`).join('. '))}">${rowsC.map((c) => `<div class="srow${hl.has(c.t) ? ' hl' : ''}" aria-hidden="true"><span class="sname">${esc(surname(N(c.t)))}</span><span class="sbar"><i style="width:${W(c.n)}"></i>${c.base !== undefined ? `<b style="left:${W(c.base * sh.nS)}"></b>` : ''}<span class="snum" style="left:${W(c.n)}">${c.n}</span></span></div>`).join('')}</div><figcaption id="strip-cap">Bars: how many of the slate’s ${sh.nS} backers also back each council candidate. Ticks: the share of other multi-candidate endorsers who do.</figcaption></figure>`;
     }
   }
 
@@ -234,37 +248,43 @@ export function buildTexts(d: Data): Texts {
     const nIn = mem.reduce((acc, m) => acc + m.inDeg, 0);
     const npm = d.edges.filter((e) => e.kind === 'endorsement' && /probable/i.test(e.conf || '') && ix.slateMembers.includes(e.t)).length;
     const least = d.communities.every((x) => x.id === c.id || (x.intactShare ?? 1) > (c.intactShare ?? 0));
-    let m = `In our clustering, the slate’s ${numWord(mem.length)} members group with ${listJoin(others.map(nameRace))} as coalition ${chip(memberBloc)}${least ? `, the least stable of the ${numWord(S.nBlocs)}` : ''}.`;
+    let m = `In our clustering, the slate’s ${numWord(mem.length)} members group with ${listJoin(others.map((n) => nlink(n)))} as coalition ${chip(memberBloc)}${least ? `, the least stable of the ${numWord(S.nBlocs)}` : ''}.`;
+    const endorsesAll = others.length === 1 && mem.every((mm) => (ix.out.get(mm.id) || []).includes(others[0].id));
+    if (endorsesAll) m += ` Each member endorses ${esc(surname(others[0]))}.`;
     if (others.length && nIn <= 2 * mem.length) {
-      m += ` Only ${numWord(nBack)} ${plural(nBack, 'group endorses', 'groups endorse')} members individually, so ${LETTERS[memberBloc]} rests on whom the members endorse, not on who endorses them.`;
+      const backs = [...new Set(mem.flatMap((mm) => ix.inn.get(mm.id) || []))].map(N).sort((x, y) => x.name.localeCompare(y.name));
+      const wa = N(c.weakest.a), wb = N(c.weakest.b);
+      const drop = npm && c.weakest.pPooled - c.weakest.pConf >= 0.05;
+      m += ` Only ${listJoin(backs.map((n, i) => `${i === 0 && !/^(Individual|Current elected official|Former elected official|Candidate)/.test(n.type) ? 'the ' : ''}${nlink(n)}`))} endorse${backs.length === 1 ? 's' : ''} members individually${npm ? `, and ${numWord(npm)} of those ${numWord(nIn)} endorsements are the probable ones` : ''}${drop ? `; without them, ${esc(surname(wa))} and ${esc(surname(wb))}, ${LETTERS[memberBloc]}’s weakest pair, fall from ${pctCut(c.weakest.pPooled, T + (S.border ?? 0.05))} to ${pctCut(c.weakest.pConf, T + (S.border ?? 0.05))}` : ''}.`;
     }
     findings.push(m);
   }
 
   // ---- coalitions ----
   {
-    const items = d.communities.map((c) => { const note = intactNote(d, ix, c); return `${chip(c.id)} ${listJoin(c.targets.map((t) => nlink(N(t), surname(N(t)))))}: ${weakPct(d, c)}, ${marginLabel(d, c)}; intact ${intactRange(c)}${note ? ` (${esc(note)})` : ''}`; });
+    let small = true;
+    const items = d.communities.map((c) => {
+      const note = intactNote(d, ix, c); const sh = (c.intact ?? 0) / (c.boots || 1);
+      const w = intactWords(c, small); if (sh >= 0.05 && sh < 0.25) small = false;
+      return `${chip(c.id)} ${listJoin(c.targets.map((t) => nlink(N(t), surname(N(t)))))}: ${weakPct(d, c)}, ${marginLabel(d, c)}; intact in ${w}${note ? ` (${esc(note)})` : ''}`;
+    });
     const bg = Object.entries(S.bootGroups || {}).map(([k, v]) => [+k, v] as [number, number]);
     const nb = bg.reduce((acc, x) => acc + x[1], 0);
     let frag = '';
     if (nb) {
-      const ks = bg.map((x) => x[0]); const mode = bg.slice().sort((x, y) => y[1] - x[1])[0][0];
       const all = S.bootIntactAll ?? 0;
-      frag = ` Drop a random tenth of the endorsements and redo the clustering, ${nb} times, and the ${numWord(S.nBlocs)} groups ${all === 0 ? 'never all survive' : `all survive in only ${pct(all / nb)} of tries`}: the method finds anywhere from ${numWord(Math.min(...ks))} to ${numWord(Math.max(...ks))} groups, ${numWord(mode)} most often.`;
+      const surv = all === 0 ? `all ${numWord(S.nBlocs)} groups survive together in none of them` : all / nb <= 0.02 ? `the ${numWord(S.nBlocs)} groups almost never all survive` : `all ${numWord(S.nBlocs)} groups survive together in ${all} of them`;
+      frag = ` Drop a random tenth of the endorsements and redo the clustering ${nb} times: ${surv}.`;
     }
-    findings.push(`<p><strong>${cap(numWord(S.nBlocs))} ${plural(S.nBlocs, 'coalition')}.</strong> A coalition: candidates whose every pair lands together in at least ${pct(T)} of ${S.nRuns.toLocaleString('en-US')} clustering runs, with or without probable endorsements. Each figure is the group’s weakest pair; “thin margin”: under ${pct(T + (S.border ?? 0.05))}.${frag}</p><ul class="coal-list">${items.map((x) => `<li>${x}</li>`).join('')}</ul>`);
+    findings.push(`<p><strong>${cap(numWord(S.nBlocs))} ${plural(S.nBlocs, 'coalition')}.</strong> A clustering program sorts the network into groups so that most endorsements fall inside one; we ran it ${S.nRuns.toLocaleString('en-US')} times. A coalition is a set of candidates in which every pair lands together at least ${pct(T)} of the time, with or without the probable endorsements. Each figure is the group’s weakest pair; under ${pct(T + (S.border ?? 0.05))} is a thin margin.${frag}</p><ul class="coal-list">${items.map((x) => `<li>${x}</li>`).join('')}</ul>`);
     const nm = nearMisses(d);
     const tail: string[] = [];
-    if (nm.length) {
-      const who = (x: typeof nm[number]) => N(x.l.id).type === 'Slate' ? 'the slate itself' : nlink(N(x.l.id));
-      tail.push(`${cap(listJoin(nm.map(who)))} ${nm.length === 1 ? 'falls' : 'fall'} just short: ${nm.length === 1 ? 'its weakest pair' : 'their weakest pairs'} with ${listJoin(nm.map((x) => chip(x.c)))} ${nm.length === 1 ? 'is' : 'are'} ${listJoin(nm.map((x) => pctCut(x.v, T)))}.`);
-    }
     const nmIds = new Set(nm.map((x) => x.l.id));
     const far = d.loose.filter((l) => N(l.id).type !== 'Slate' && !nmIds.has(l.id))
       .map((l) => { const p = l.partners.slice().sort((x, y) => y.p - x.p)[0]; return { l, p }; }).sort((x, y) => (y.p?.p ?? 0) - (x.p?.p ?? 0));
     if (far.length && far[0].p) {
-      const [f0, ...fr] = far;
-      tail.push(`${cap(numWord(far.length))} ${plural(far.length, 'candidate fits', 'candidates fit')} no coalition.${far.length > 1 ? ` ${nlink(N(f0.l.id))} comes closest, landing with ${esc(surname(N(f0.p!.t)))} in ${pairPct(f0.p!.p, f0.p!.pConf, T)} of runs${fr.length ? `; ${fr.map((x, i) => `${nlink(N(x.l.id))}${i === 0 ? ' reaches' : ''} ${pairPct(x.p?.p ?? 0, x.p?.pConf ?? 0, T)}`).join(', ')}` : ''}.` : ''}`);
+      const [f0] = far;
+      tail.push(`${cap(numWord(far.length))} ${plural(far.length, 'candidate fits', 'candidates fit')} no coalition.${far.length > 1 ? ` ${nlink(N(f0.l.id))} comes closest, landing with ${esc(surname(N(f0.p!.t)))} in ${upTo(f0.p!.p, f0.p!.pConf)} of runs.` : ''}`);
     }
     if (tail.length) findings.push(tail.join(' '));
   }
@@ -277,17 +297,16 @@ export function buildTexts(d: Data): Texts {
     const ts = [...tiers.entries()].sort((a, b) => b[0] - a[0]);
     const nm = (b: typeof rob[number]) => `${nlink(N(b.id), undefined, 'strong')}${b.reachConf !== undefined && b.reachConf !== b.reach ? ` (${b.reachConf} without the probable endorsements)` : ''}`;
     const tierTxt = ([r, bs]: [number, typeof rob], first: boolean) => bs.length === 1
-      ? `${nm(bs[0])} reaches ${numWord(r)}${first ? ` of the ${numWord(S.nBlocs)} coalitions` : ''}`
-      : `${listJoin(bs.map(nm))} each reach ${numWord(r)}`;
+      ? `${first && !/^(Individual|Current elected official|Former elected official|Candidate)/.test(N(bs[0].id).type) ? 'the ' : ''}${nm(bs[0])} backs candidates in ${numWord(r)}${first ? ` of the ${numWord(S.nBlocs)} coalitions` : ''}`
+      : `${listJoin(bs.map(nm))} each back candidates in ${numWord(r)}`;
     let s = `${cap(tierTxt(ts[0], true))}.${ts.length > 1 ? ` ${cap(ts.slice(1).map((t) => tierTxt(t, false)).join('. '))}.` : ''}`;
-    s += ` ${rob.length === 1 ? 'Its rank holds' : 'Their ranks hold'} when we drop any one endorsement, a random tenth of them, or the probable ones.`;
     findings.push(s);
   }
 
   // ---- overview figure key + alt ----
   const ringed = rob.slice(0, 10);
   const sameOrder = ringed.length === rob.length;   // rings are numbered in the order the bridges paragraph names them
-  const overviewKey = `<p class="small">Letters: coalitions. White: none. ${sameOrder ? 'Rings: endorsers named above, in order.' : `Numbered rings: ${ringed.map((b, i) => `${i + 1}, ${esc(N(b.id).name)}`).join('; ')}.`} Blue: probable. Dashed: slate link.</p>`;
+  const overviewKey = `<p class="small">${sameOrder ? 'Rings: endorsers named above, in order.' : `Numbered rings: ${ringed.map((b, i) => `${i + 1}, ${esc(N(b.id).name)}`).join('; ')}.`} Blue: probable.</p>`;
   const overviewAlt = `Network diagram of the ${S.nCore} most connected candidates and endorsers. Outlines mark ${numWord(S.nBlocs)} coalitions: ${d.communities.map((c) => `${LETTERS[c.id]}, ${blocName(ix, c)}`).join('; ')}. White dots fit no coalition, including ${listJoin(d.loose.map((l) => N(l.id).name))}. Numbered rings: ${listJoin(ringed.map((b, i) => `${i + 1}, ${N(b.id).name} (${b.reach} of ${S.nBlocs})`))}.`;
   const graphSummary = `Interactive network of ${S.nNodes} candidates and endorsers and ${S.nEndorsementEdges} endorsements${nProb ? ` (${nProb} probable)` : ''}. ${overviewAlt} Use search or the side panel to explore by keyboard.`;
   const nCand = d.nodes.filter((n) => n.isTarget && n.type !== 'Slate' && !n.analysisEndorser).length;

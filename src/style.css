@@ -305,12 +305,26 @@ body.app{display:flex;flex-direction:column;height:100dvh;overflow:hidden;font-f
 /* headline strip: slate backers per council candidate, tick = base rate */
 .strip{margin:.4rem 0 1.1rem;max-width:520px}
 .strip-rows{display:grid;gap:3px}
-.srow{display:grid;grid-template-columns:7.5em 1fr 2em;align-items:center;gap:.5em;font-size:13px;line-height:1.25}
+.srow{display:grid;grid-template-columns:7.5em 1fr;align-items:center;gap:.5em;font-size:13px;line-height:1.25}
 .srow .sname{text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .srow .sbar{position:relative;height:12px;background:#f0f0f0}
 .srow .sbar i{position:absolute;left:0;top:0;bottom:0;background:#555}
 .srow .sbar b{position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;background:#d1452f}
-.srow .snum{font-variant-numeric:tabular-nums}
+.srow .snum{position:absolute;top:50%;transform:translateY(-50%);margin-left:6px;font-variant-numeric:tabular-nums;line-height:1}
+.srow .sbar{margin-right:2.2em}
+.srow.hl .sbar i{background:#111}.srow.hl .sname,.srow.hl .snum{font-weight:700}
+.srow .sbar i{background:#9a9a9a}
+@media (max-width:420px){.apptitle .kick .yr{display:none}}
 .strip figcaption{font-size:13px;color:#555;margin-top:.35rem}
 .legend .lbr{list-style:none;margin:.4rem 0 0;padding:0;display:grid;gap:2px;font-size:13px}
 .legend .lbr .ringn{display:inline-grid;place-items:center;width:18px;height:18px;border:2px solid #111;border-radius:50%;font-size:12px;font-weight:700;line-height:1}
+@media (max-width:640px){
+  .app #graph{height:calc(100% - var(--peek,52px))}
+  .sheet:not(.open){height:var(--peek,52px)}
+  .sheet.open{height:max(50dvh,var(--peek,52px))}
+  .sheet-open.app #graph{height:calc(100% - max(50dvh,var(--peek,52px)))}
+  .sheet.peek:not(.open) .tabs{display:flex}
+  .sheet.peek:not(.open) .panel{display:block}
+  .zoom{bottom:calc(var(--peek,52px) + 10px);flex-direction:row}
+  .sheet-open .zoom{bottom:calc(max(50dvh,var(--peek,52px)) + 10px)}
+}
