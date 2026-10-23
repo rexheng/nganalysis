@@ -1,6 +1,6 @@
 """Headless verification of a deployed URL: the graph-only landing page (/) and the findings page (/findings/).
 Screenshots at 1440/1024/800/390, console errors, canvas click/tap, search, bottom sheet, labels, deep links (?node=),
-overlap tooltips, axe on both pages, and the URL format of every source.
+references, axe on both pages, and the URL format of every source.
 Usage: python scripts/verify.py <url> <outdir>"""
 import sys, json, os, re, urllib.request, zipfile, io
 from urllib.parse import urlparse
@@ -127,22 +127,11 @@ with sync_playwright() as p:
         f = c['findings'] = pg.evaluate("""(()=>({draft: (document.querySelector('.draft')||{}).textContent, back_links: [...document.querySelectorAll('a[href="/"]')].length,
            hscroll: document.documentElement.scrollWidth > innerWidth, h1: document.querySelector('h1').textContent,
            node_links: [...document.querySelectorAll('a.nlink')].length, bad_node_links: [...document.querySelectorAll('a.nlink')].filter(a=>!/^\\/\\?node=/.test(a.getAttribute('href'))).length,
-           heatmap_region: (()=>{const h=document.getElementById('heatmap');return {tabindex:h.getAttribute('tabindex'),role:h.getAttribute('role'),label:h.getAttribute('aria-label')}})(),
-           zero_cells: [...document.querySelectorAll('#overlap td[data-a]')].filter(t=>t.textContent.trim()==='0').length,
            jaccard_on_page: /jaccard|combined lists|either list/i.test(document.body.innerText),
-           findings_words: (()=>{const a=document.querySelector('.story').cloneNode(true); return a.innerText.split(/\s+/).filter(Boolean).length})(),
-           heatmap_toggle_present: !!document.querySelector('#hmmode'),
+           grids_present: ['#heatmap','#overlap','.matrix-sec','#hmmode','.ovtip'].filter(q=>document.querySelector(q)),
+           findings_words: (()=>{const a=document.querySelector('.story').cloneNode(true); return a.innerText.split(/\\s+/).filter(Boolean).length})(),
            references: (()=>{const li=[...document.querySelectorAll('#refs ~ .reflist li[id^=ref-]')]; return {n: li.length, missing_url_or_date: li.filter(x=>!x.querySelector('a[href^=http]')||!/Accessed|not recorded/.test(x.innerText)).length}})()}))()""")
         pg.screenshot(path=f'{OUT}/{name}-findings-top.png'); pg.screenshot(path=f'{OUT}/{name}-findings-full.png', full_page=True)
-        cell = pg.locator('#overlap td[data-a]').nth(3); cell.scroll_into_view_if_needed(); pg.wait_for_timeout(200)
-        if mob: cell.tap()
-        else: cell.click()
-        pg.wait_for_timeout(300)
-        f['ovtip_after_tap'] = pg.evaluate("(()=>{const t=document.getElementById('ovtip');return {visible:!t.hidden,sheet:t.classList.contains('sheet'),text:t.textContent.slice(0,80)}})()")
-        pg.screenshot(path=f'{OUT}/{name}-overlap-tap.png')
-        if mob: pg.locator('#ovtip .ovx').tap()
-        else: pg.locator('#ovtip .ovx').click()
-        pg.wait_for_timeout(200); f['ovtip_closed'] = pg.evaluate("document.getElementById('ovtip').hidden")
         if True:   # axe at every width
             pg.add_script_tag(path='/tmp/axe-pkg/node_modules/axe-core/axe.min.js'); f['axe'] = pg.evaluate(AXE)
         # a findings name link opens the graph with that node selected

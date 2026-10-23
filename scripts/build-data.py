@@ -18,7 +18,7 @@ Analysis (all on the undirected, unweighted projection):
   * Only confirmed endorsements are edges. Rows rated "Probable" in the cleaned table are moved to
     unverified_leads.csv and never enter the graph or the analysis.
     Leaves inherit the community of their single neighbour.
-  * Endorser overlap between every pair of candidates (count + Jaccard).
+  * Shared endorsers between the slate page and each council candidate (count + Jaccard).
   * ForceAtlas2 layout (fixed seed) on the full graph for a stable precomputed layout.
 """
 import argparse, csv, json, os, re, shutil, hashlib, collections, datetime, math, sys
@@ -472,16 +472,9 @@ for bi, cm in enumerate(comm_meta):   # data survival per coalition: intact in h
     cm.update(intact=k_, intactShare=round(k_ / BOOT, 3), intactLo=round(lo_, 3), intactHi=round(hi_, 3), boots=BOOT,
               split=f_.get('split', 0), joiners=[dict(t=t_, n=n_) for t_, n_ in joiners.most_common(3)])
 
-# overlap between targets
+# endorser sets of every candidate (for the slate comparison below)
 tg_all = [name2id[n] for n in cand_names]
 endorsers_of = {t: set(D.predecessors(t)) for t in tg_all}
-overlap = []
-for i, a in enumerate(tg_all):
-    for b in tg_all[i+1:]:
-        s = endorsers_of[a] & endorsers_of[b]
-        if s:
-            u = endorsers_of[a] | endorsers_of[b]
-            overlap.append(dict(a=a, b=b, n=len(s), j=round(len(s)/len(u), 4), oc=round(len(s)/min(len(endorsers_of[a]), len(endorsers_of[b])), 4), shared=sorted(s, key=nm)))
 
 # ---------- headline numbers: whose endorser lists overlap most with the slate page's? ----------
 slate_id = name2id.get(SLATE)
@@ -763,7 +756,7 @@ summary['nProbableMoved'] = len(PROB_ROWS)
 _ph = os.path.join(here, '..', 'public', 'photos')
 photos = {f[:-5]: f'/photos/{f}' for f in sorted(os.listdir(_ph)) if f.endswith('.webp') and f[:-5] in nodes} if os.path.isdir(_ph) else {}
 out = dict(urls=urls, urlLabels=[url_label[i_] for i_ in range(len(urls))], refs=refs, photos=photos, slateOverlap=slate_overlap, summary=summary, communities=comm_meta, loose=loose_meta, ties=ties, races=races,
-           nodes=list(nodes.values()), edges=edges, overlap=overlap, pairTogether=pair_together,
+           nodes=list(nodes.values()), edges=edges, pairTogether=pair_together,
            variants=variants_meta, borderlinePairs=borderline_pairs,
            coTargets=targets_core)
 

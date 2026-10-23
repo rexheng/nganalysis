@@ -25,7 +25,6 @@ function bakeText(): Plugin {
         .replace('<!--OVERVIEW_WIDE-->', svg('wide')).replace('<!--OVERVIEW_NARROW-->', svg('narrow'))
         .replace('<!--OVERVIEW_KEY-->', t.overviewKey).replace('<!--OVERVIEW_ALT-->', esc(t.overviewAlt))
         .replace('<!--GRAPH_SUMMARY-->', esc(t.graphSummary))
-        .replace('<!--SEEDS-->', d.summary.nRuns.toLocaleString('en-US'))
         .replace('<!--METHODS-->', toGraphLinks(methodsHtml(d)))
         .replace('<!--REFERENCES-->', referencesHtml(d));
     },

@@ -21,7 +21,6 @@ export interface Loose { id: string; best: number; partners: { t: string; p: num
 export interface Variant { members: string[]; where: string[]; meanAll: number }
 export interface Tie { a: string; b: string; max: number; maxA: string; maxB: string; mean: number }
 export interface Ref { n: number; u: number; title: string; url: string; at: string[] }
-export interface Overlap { a: string; b: string; n: number; j: number; oc: number; shared: string[] }
 export interface SlateOverlap {
   slate: string; council: { t: string; j: number; n: number; base?: number; nList: number }[]; nOthersMulti?: number;
   leadBoot?: { a: string; b: string; resamples: number; aLeads: number; tie: number; aMajority: number; bMajority: number }; topKShare: Record<string, number>; top1Share: number; top2Share: number;
@@ -45,7 +44,7 @@ export interface Summary {
 }
 export interface Data {
   urls: string[]; urlLabels: string[]; refs: Ref[]; photos?: Record<string, string>; slateOverlap: SlateOverlap | null; summary: Summary; communities: Community[]; loose: Loose[]; ties: Tie[];
-  races: { race: string; candidates: string[] }[]; nodes: GNode[]; edges: GEdge[]; overlap: Overlap[];
+  races: { race: string; candidates: string[] }[]; nodes: GNode[]; edges: GEdge[];
   pairTogether: Record<string, number>; coTargets: string[];
   variants: Variant[]; borderlinePairs: { a: string; b: string; p: number }[];
 }
