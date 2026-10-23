@@ -9,6 +9,7 @@ URL = sys.argv[1].rstrip('/'); OUT = sys.argv[2] if len(sys.argv) > 2 else '/wor
 os.makedirs(OUT, exist_ok=True)
 VPS = {'d1440': (1440, 900, False), 'd1024': (1024, 768, False), 't800': (800, 900, True), 'm390': (390, 844, True)}
 report = {'url': URL, 'errors': {}, 'checks': {}}
+RED = lambda t: re.sub(r'token=[^&\s"\']+', 'token=REDACTED', str(t))   # never write the logo.dev key into reports
 g = json.load(urllib.request.urlopen(URL + '/data/graph.json'))
 bad = [u for u in g['urls'] if urlparse(u).scheme not in ('http', 'https') or not urlparse(u).netloc or ' ' in u]
 refu = {r['u']: r for r in g.get('refs', [])}
@@ -51,9 +52,9 @@ with sync_playwright() as p:
     for name, (w, h, mob) in VPS.items():
         ctx = b.new_context(viewport={'width': w, 'height': h}, device_scale_factor=2 if mob else 1, is_mobile=mob, has_touch=mob)
         pg = ctx.new_page(); errs = []
-        pg.on('console', lambda m: errs.append(f'{m.type}: {m.text}') if m.type == 'error' else None)
-        pg.on('pageerror', lambda e: errs.append(f'pageerror: {e}'))
-        pg.on('requestfailed', lambda r: errs.append(f'requestfailed: {r.url}'))
+        pg.on('console', lambda m: errs.append(RED(f'{m.type}: {m.text}')) if m.type == 'error' else None)
+        pg.on('pageerror', lambda e: errs.append(RED(f'pageerror: {e}')))
+        pg.on('requestfailed', lambda r: errs.append(RED(f'requestfailed: {r.url}')))
         c = report['checks'].setdefault(name, {})
         # ---------- landing page: graph only ----------
         pg.goto(URL + '/', wait_until='networkidle'); pg.wait_for_function('window.__ready === true', timeout=20000); pg.wait_for_timeout(700)
@@ -122,12 +123,38 @@ with sync_playwright() as p:
         if name in ('d1440', 'm390'): c['green_panel_text'] = pg.locator('#panel').inner_text()
         pg.goto(URL + f'/#node={nid}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(500)
         c['deeplink_legacy_hash'] = pg.locator('#panel h2').first.inner_text()
+        # ---------- filter: endorser types and races ----------
+        fr = c['filter'] = {}
+        pg.goto(URL + f'/?hide=individuals&node={nid}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(800)
+        fr['hide_individuals'] = {'state': pg.evaluate('window.__test.filt()'), 'banner': pg.locator('#panel .banner').first.inner_text(),
+            'individual_visible': pg.evaluate("window.__test.visible(window.__test.byName('Ben Bartlett'))"), 'url': pg.evaluate('location.search')}
+        shoot_panel(pg, mob, f'{OUT}/{name}-filter-hideind-tregub.png')
+        pg.goto(URL + '/?hide=individuals&races=Rent%20Board'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(800)
+        fr['combined'] = {'state': pg.evaluate('window.__test.filt()'), 'tregub_visible': pg.evaluate(f"window.__test.visible('{nid}')"),
+            'slate_visible': pg.evaluate("window.__test.visible(window.__test.byName('Berkeley Right to Housing slate'))"), 'count': pg.locator('#fcount').inner_text()}
+        pg.screenshot(path=f'{OUT}/{name}-filter-combined.png')
+        # keyboard: open the control, turn a race off with the keyboard, reset
+        pg.goto(URL + '/'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(500)
+        pg.focus('#filterbox summary'); pg.keyboard.press('Enter'); pg.wait_for_timeout(200)
+        fr['opens_with_keyboard'] = pg.evaluate("document.getElementById('filterbox').open")
+        pg.focus('[data-fr="Auditor"]'); pg.keyboard.press('Space'); pg.wait_for_timeout(500)
+        fr['race_off_by_keyboard'] = [pg.get_attribute('[data-fr="Auditor"]', 'aria-pressed'), pg.evaluate('location.search')]
+        pg.screenshot(path=f'{OUT}/{name}-filter-open.png')
+        pg.add_script_tag(path='/tmp/axe-pkg/node_modules/axe-core/axe.min.js'); fr['axe_filter_open'] = pg.evaluate(AXE)
+        pg.click('#freset'); pg.wait_for_timeout(400)
+        fr['after_reset'] = [pg.evaluate('window.__test.filt()'), pg.evaluate('location.search')]
+        pg.keyboard.press('Escape'); pg.wait_for_timeout(200); fr['escape_closes'] = not pg.evaluate("document.getElementById('filterbox').open")
+        aid = pg.evaluate("window.__test.byName('Alameda County Democratic Party')")
+        pg.goto(URL + f'/?node={aid}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(2500)
+        fr['logos'] = pg.evaluate("(()=>{const im=[...document.querySelectorAll('#panel .av-logo img')];return {imgs: im.length, loaded: im.filter(i=>i.complete&&i.naturalWidth>0).length, fallbacks: document.querySelectorAll('#panel .av-logo:not(:has(img))').length}})()")
+        c['landing_tools_fit'] = pg.evaluate("(()=>{const r=document.querySelector('.ab-tools').getBoundingClientRect();return {w:Math.round(r.width),h:Math.round(r.height),hscroll:document.documentElement.scrollWidth>innerWidth}})()")
         # ---------- findings page ----------
         pg.goto(URL + '/findings/', wait_until='networkidle'); pg.wait_for_timeout(800)
         f = c['findings'] = pg.evaluate("""(()=>({draft: (document.querySelector('.draft')||{}).textContent, back_links: [...document.querySelectorAll('a[href="/"]')].length,
            hscroll: document.documentElement.scrollWidth > innerWidth, h1: document.querySelector('h1').textContent,
            node_links: [...document.querySelectorAll('a.nlink')].length, bad_node_links: [...document.querySelectorAll('a.nlink')].filter(a=>!/^\\/\\?node=/.test(a.getAttribute('href'))).length,
            jaccard_on_page: /jaccard|combined lists|either list/i.test(document.body.innerText),
+           logo_credit: !!document.querySelector('a[href="https://logo.dev"]'),
            grids_present: ['#heatmap','#overlap','.matrix-sec','#hmmode','.ovtip'].filter(q=>document.querySelector(q)),
            findings_words: (()=>{const a=document.querySelector('.story').cloneNode(true); return a.innerText.split(/\\s+/).filter(Boolean).length})(),
            references: (()=>{const li=[...document.querySelectorAll('#refs ~ .reflist li[id^=ref-]')]; return {n: li.length, missing_url_or_date: li.filter(x=>!x.querySelector('a[href^=http]')||!/Accessed|not recorded/.test(x.innerText)).length}})()}))()""")
@@ -140,5 +167,4 @@ with sync_playwright() as p:
         report['errors'][name] = errs
         ctx.close()
     b.close()
-json.dump(report, open(f'{OUT}/verify_report.json', 'w'), indent=1)
-print(json.dumps(report, indent=1))
+out = RED(json.dumps(report, indent=1)); open(f'{OUT}/verify_report.json', 'w').write(out); print(out)

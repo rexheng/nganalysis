@@ -74,10 +74,11 @@ export const raceShort = (r?: string) => (r || '').replace('Council ', '');
 
 /** "Shanoski–Park–Brown" or "Micael + 5 slate members" */
 export function blocName(ix: Ix, c: Community) {
-  const anchors = c.anchors.map((a) => ix.byId.get(a)!);
-  const mem = c.targets.filter((t) => ix.byId.get(t)!.memberOf).length;
-  const base = anchors.map(surname).join('–');
-  return mem ? `${base}${base ? ' + ' : ''}${mem} slate ${plural(mem, 'member')}` : base;
+  // every candidate by surname, slate page last: "Micael, Rodriguez, Ortiz, and the Right to Housing slate"
+  const ns = c.targets.map((t) => ix.byId.get(t)!);
+  const people = ns.filter((n) => n.type !== 'Slate').map(surname);
+  const slates = ns.filter((n) => n.type === 'Slate').map((n) => 'the ' + n.name.replace(/^Berkeley /, ''));
+  return listJoin([...people, ...slates]);
 }
 export const commName = (ix: Ix, d: Data, c: number) => (c < 0 ? 'No robust coalition' : `${LETTERS[c]} · ${blocName(ix, d.communities[c])}`);
 export const chip = (c: number, title = '') =>

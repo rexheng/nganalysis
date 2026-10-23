@@ -105,5 +105,6 @@ export function referencesHtml(d: Data) {
     return `Accessed ${ds.length === 1 ? prettyDate(ds[0]) : `${prettyDate(ds[0])} to ${prettyDate(ds[ds.length - 1])}`}.`;
   };
   return `<h2 id="refs">References</h2>
-<ol class="reflist">${d.refs.map((r) => `<li id="ref-${r.n}"><span class="rt">${esc(r.title)}</span>. <a href="${esc(r.url)}" rel="noopener" target="_blank">${esc(r.url.replace(/^https?:\/\//, ''))}</a>. <span class="acc">${when(r.at)}</span></li>`).join('')}</ol>`;
+<ol class="reflist">${d.refs.map((r) => `<li id="ref-${r.n}"><span class="rt">${esc(r.title)}</span>. <a href="${esc(r.url)}" rel="noopener" target="_blank">${esc(r.url.replace(/^https?:\/\//, ''))}</a>. <span class="acc">${when(r.at)}</span></li>`).join('')}</ol>
+<p class="credit-logo"><a href="https://logo.dev">Logos provided by Logo.dev</a></p>`;
 }

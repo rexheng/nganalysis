@@ -26,7 +26,16 @@
       <input id="q" type="text" role="combobox" placeholder="Find a person or group…" autocomplete="off" aria-autocomplete="list" aria-controls="qres" aria-expanded="false" />
       <ul id="qres" role="listbox" aria-label="Matches" hidden></ul>
     </div>
-    <label class="select">Color by <select id="colorby"><option value="community">Coalition</option><option value="type">Actor type</option></select></label>
+    <label class="select"><span class="hide-n">Color by </span><select id="colorby" aria-label="Color by"><option value="community">Coalition</option><option value="type">Actor type</option></select></label>
+    <details id="filterbox" class="filterbox">
+      <summary>Filter<span id="fcount" class="fcount" hidden></span></summary>
+      <div class="fpanel">
+        <label class="switch"><input type="checkbox" id="hideind" /> <span>Hide individuals</span></label>
+        <fieldset><legend>Endorsers</legend><div class="fchips" id="ftypes"></div></fieldset>
+        <fieldset><legend>Races</legend><div class="fchips" id="fraces"></div></fieldset>
+        <p class="fnote"><span id="fstat" role="status"></span><button type="button" id="freset">Reset</button></p>
+      </div>
+    </details>
   </div>
 </header>
 <main class="appmain">
