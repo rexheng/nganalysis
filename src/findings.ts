@@ -11,21 +11,21 @@ function heat(v: number) {   // returns hex so contrast() can read it
   const f = (t: number) => { t = (t + 1) % 1; const c = t < 1 / 6 ? p + (q - p) * 6 * t : t < 1 / 2 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p; return Math.round(c * 255).toString(16).padStart(2, '0'); };
   return `#${f(h + 1 / 3)}${f(h)}${f(h - 1 / 3)}`;
 }
-function renderHeatmap(d: Data, conf = false) {
+function renderHeatmap(d: Data) {
   const ix = index(d);
   const order = [...d.communities.flatMap((c) => c.targets), ...d.loose.map((l) => l.id)];
   const ids = order.filter((id, i) => order.indexOf(id) === i);
   const N = (id: string) => ix.byId.get(id)!;
   const lab = (id: string) => { const n = N(id); return n.type === 'Slate' ? 'Slate' : surname(n); };
-  let h = `<table class="hm"><caption class="sr">Share of ${d.summary.nRuns.toLocaleString("en-US")} clustering runs in which each pair of candidates is grouped together, ${conf ? 'without the probable endorsements' : 'with all endorsements'}</caption><thead><tr><td></td>${ids.map((id) => `<th scope="col"><span>${chip(N(id).community)} ${esc(lab(id))}</span></th>`).join('')}</tr></thead><tbody>`;
+  let h = `<table class="hm"><caption class="sr">Share of ${d.summary.nRuns.toLocaleString("en-US")} clustering runs in which each pair of candidates is grouped together</caption><thead><tr><td></td>${ids.map((id) => `<th scope="col"><span>${chip(N(id).community)} ${esc(lab(id))}</span></th>`).join('')}</tr></thead><tbody>`;
   for (const a of ids) {
     h += `<tr><th scope="row">${chip(N(a).community)} ${esc(lab(a))}${N(a).memberOf ? '<sup aria-label="slate member">s</sup>' : ''} <small>${esc(raceShort(N(a).race))}</small></th>`;
     for (const b of ids) {
       const ca = N(a).community, cb = N(b).community;
       const same = ca >= 0 && ca === cb;
       if (a === b) { h += `<td class="diag${same ? ' blk' : ''}" ${same ? `style="--bc:${commColor(ca)}"` : ''}><span class="sr">same candidate</span></td>`; continue; }
-      const v = conf ? (d.pairTogetherConf[`${a}|${b}`] ?? d.pairTogetherConf[`${b}|${a}`] ?? 0) : ix.together(a, b); const bg = heat(v); const fg = contrast('#ffffff', bg) >= contrast('#000000', bg) ? '#fff' : '#000';
-      h += `<td class="${same ? 'blk' : ''}" style="background:${bg};color:${fg};${same ? `--bc:${commColor(ca)}` : ''}" title="${esc(N(a).name)} & ${esc(N(b).name)}: together in ${pct(v)} of runs${conf ? ' without the probable endorsements' : ''}">${v > 0 && v < 0.005 ? '&lt;1' : Math.round(v * 100)}</td>`;
+      const v = ix.together(a, b); const bg = heat(v); const fg = contrast('#ffffff', bg) >= contrast('#000000', bg) ? '#fff' : '#000';
+      h += `<td class="${same ? 'blk' : ''}" style="background:${bg};color:${fg};${same ? `--bc:${commColor(ca)}` : ''}" title="${esc(N(a).name)} & ${esc(N(b).name)}: grouped together in ${pct(v)} of runs">${v > 0 && v < 0.005 ? '&lt;1' : Math.round(v * 100)}</td>`;
     }
     h += '</tr>';
   }
@@ -106,11 +106,5 @@ function renderOverlap(d: Data) {
 
 fetch('/data/graph.json').then((r) => r.json()).then((d: Data) => {
   renderHeatmap(d); renderOverlap(d);
-  const seg = document.getElementById('hmmode');
-  seg?.addEventListener('click', (e) => {
-    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-hm]'); if (!b) return;
-    seg.querySelectorAll('[data-hm]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
-    renderHeatmap(d, b.dataset.hm === 'conf');
-  });
 })
   .catch((err) => { console.error(err); });

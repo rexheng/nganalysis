@@ -11,6 +11,10 @@ VPS = {'d1440': (1440, 900, False), 'd1024': (1024, 768, False), 't800': (800, 9
 report = {'url': URL, 'errors': {}, 'checks': {}}
 g = json.load(urllib.request.urlopen(URL + '/data/graph.json'))
 bad = [u for u in g['urls'] if urlparse(u).scheme not in ('http', 'https') or not urlparse(u).netloc or ' ' in u]
+refu = {r['u']: r for r in g.get('refs', [])}
+undated = [e['id'] for e in g['edges'] if not any(x['u'] in refu and x.get('at') and g['urls'][x['u']].startswith('http') for x in e['src'])]
+report['checks']['every_edge_has_dated_source'] = {'edges': len(g['edges']), 'refs': len(refu), 'failing': undated, 'ok': not undated and len(refu) == len(g['urls']),
+    'ref_numbers_contiguous': sorted(r['n'] for r in refu.values()) == list(range(1, len(refu) + 1)), 'probable_edges': [e['id'] for e in g['edges'] if 'conf' in e]}
 report['checks']['sources'] = {'distinct_urls': len(g['urls']), 'bad_format': bad, 'edges': len(g['edges']), 'edges_without_source': [e['id'] for e in g['edges'] if not e['src']]}
 LEAK = re.compile(r'verify|uncertain|needs.?check|possibly same|\bRex\b|review [A-Z]-?\d|internal_notes', re.I)
 leaks = {}
@@ -21,9 +25,26 @@ for f in [x for x, _ in g['summary'].get('downloads', [])] + ['METHODS.md', 'gra
     elif f.endswith('.zip'): t = ''
     else: t = body.decode('utf-8', 'replace')
     leaks[f] = [m.group(0) for m in LEAK.finditer(t)][:3]
+BANNED = re.compile(r'probable|betweenness|lands most|crosses? coalitions|spans? (the most )?coalitions|bridges? view', re.I)
+banned = {}
 for page in ('/', '/findings/'):
-    t = urllib.request.urlopen(URL + page).read().decode(); leaks[page] = [m.group(0) for m in LEAK.finditer(t)][:3]
+    t = urllib.request.urlopen(URL + page).read().decode(); leaks[page] = [m.group(0) for m in LEAK.finditer(t)][:3]; banned[page] = [m.group(0) for m in BANNED.finditer(t)][:3]
+banned['METHODS.md'] = [m.group(0) for m in BANNED.finditer(urllib.request.urlopen(URL + '/data/METHODS.md').read().decode())][:3]
+for path in ('/internal/', '/raw/rex_doc.md', '/raw/rex_doc.docx', '/data/internal/'):
+    try: body = urllib.request.urlopen(URL + path).read().decode('utf-8', 'replace'); code = 'app fallback (not the file)' if 'id="graph"' in body else 'EXPOSED'
+    except Exception as ex: code = getattr(ex, 'code', 'err')
+    leaks[path + ' (HTTP)'] = code
+report['checks']['banned_words'] = banned
 report['checks']['leaks'] = leaks
+PANEL = """(()=>{const P=document.getElementById('panel');const refs=[...P.querySelectorAll('a[data-ref]')];
+  return {h2: (P.querySelector('h2')||{}).textContent, banner: [...P.querySelectorAll('.banner')].map(b=>b.innerText), groups: [...P.querySelectorAll('.grp>summary')].map(s=>s.innerText.replace(/\\s+/g,' ').trim()),
+   markers: refs.length, unresolved_markers: refs.filter(a=>!P.querySelector('#pref-'+a.dataset.ref)).map(a=>a.dataset.ref), ref_items: P.querySelectorAll('.reflist li').length,
+   ref_items_missing_date_or_url: [...P.querySelectorAll('.reflist li')].filter(li=>!li.querySelector('a.ru[href^=http]')||!/Accessed|not recorded/.test(li.innerText)).length,
+   place: (P.querySelector('.place')||{}).innerText, banned: (P.innerText.match(/probable|betweenness|lands most|crosses? coalitions|spans? coalitions/ig)||[]),
+   small_text_px: Math.min(...[...P.querySelectorAll('*')].filter(e=>e.childNodes.length&&[...e.childNodes].some(n=>n.nodeType===3&&n.textContent.trim())).map(e=>parseFloat(getComputedStyle(e).fontSize)))}})()"""
+def shoot_panel(pg, mob, path):
+    if mob: pg.screenshot(path=path)   # the bottom sheet fills the screen on phones
+    else: pg.locator('#panel').screenshot(path=path)
 AXE = "axe.run(document, {runOnly: {type: 'tag', values: ['wcag2a','wcag2aa','wcag21a','wcag21aa','best-practice']}}).then(r => r.violations.map(v => ({id: v.id, impact: v.impact, n: v.nodes.length, sample: v.nodes.slice(0,3).map(x => x.target.join(' '))})))"
 with sync_playwright() as p:
     b = p.chromium.launch(args=['--use-gl=swiftshader', '--enable-webgl', '--ignore-gpu-blocklist'])
@@ -45,14 +66,12 @@ with sync_playwright() as p:
           sigma_before_interaction: window.__test.sigma(), preview_canvas: !!document.querySelector('#graph .preview'),
           words_outside_panel: (()=>{const cl=document.body.cloneNode(true); cl.querySelectorAll('#sheet,#legendbox,.sr,script,noscript,#tooltip,#qres').forEach(e=>e.remove()); return cl.innerText.split(/\\s+/).filter(Boolean).length})()}})()""")
         pg.screenshot(path=f'{OUT}/{name}-landing.png')
-        for view in ['coalitions', 'bridges', 'race']:
+        for view in ['coalitions', 'race']:
             if mob and not pg.evaluate("document.getElementById('sheet').classList.contains('open')"): pg.locator('#sheetbtn').tap()
             pg.click(f'[data-view={view}]'); pg.wait_for_timeout(500)
             pg.screenshot(path=f'{OUT}/{name}-{view}.png')
         c['default_race'] = pg.evaluate("document.querySelector('[data-race][aria-pressed=true]').dataset.race")
-        pg.click('[data-view=bridges]'); pg.wait_for_timeout(300)
-        for s in ['bc', 'cand', 'reach']:
-            pg.click(f'[data-bsort={s}]'); pg.wait_for_timeout(400); pg.screenshot(path=f'{OUT}/{name}-bridges-{s}.png')
+        c['bridges_tab_present'] = pg.locator('[data-view=bridges]').count() > 0
         pg.click('[data-view=coalitions]'); pg.wait_for_timeout(300)
         if mob: pg.locator('#sheetbtn').tap(); pg.wait_for_timeout(400)
         c['sheet_closed_before_click'] = (not pg.evaluate("document.getElementById('sheet').classList.contains('open')")) if mob else None
@@ -63,10 +82,15 @@ with sync_playwright() as p:
         if mob: pg.touchscreen.tap(x, y)
         else: pg.mouse.move(x, y); pg.wait_for_timeout(200); pg.mouse.click(x, y)
         pg.wait_for_timeout(900)
-        c['click'] = {'clicked': 'Igor A. Tregub', 'panel_h3': pg.locator('#panel h2').first.inner_text(), 'source_links': pg.locator('#panel .srcs a').count(),
+        c['click'] = {'clicked': 'Igor A. Tregub', 'panel': pg.evaluate(PANEL), 'selected': pg.evaluate('window.__test.state.selected'),
                       'tooltip_hidden': pg.evaluate("document.getElementById('tooltip').hidden"), 'url': pg.evaluate('location.search'),
                       'sheet_open': pg.evaluate("document.getElementById('sheet').classList.contains('open')") if mob else None}
-        pg.screenshot(path=f'{OUT}/{name}-node-click.png')
+        pg.screenshot(path=f'{OUT}/{name}-node-click.png'); shoot_panel(pg, mob, f'{OUT}/{name}-panel-tregub.png')
+        if name in ('d1440', 'm390'): c['tregub_panel_text'] = pg.locator('#panel').inner_text()
+        first = pg.locator('#panel a[data-ref]').first
+        if first.count():
+            first.click() if not mob else first.tap(); pg.wait_for_timeout(700)
+            c['ref_click'] = pg.evaluate("(()=>{const li=document.querySelector('#panel .reflist li.flash');if(!li)return null;const r=li.getBoundingClientRect(),P=document.getElementById('panel').getBoundingClientRect();return {id:li.id, visible:r.top>=P.top-1&&r.bottom<=Math.max(P.bottom,innerHeight)+1, url:location.search}})()")
         c['unlabelled_neighbours_tregub'] = pg.evaluate("(()=>{const L=new Set(window.__labels||[]);const g=document.getElementById('graph').getBoundingClientRect();const inV=window.__test.nbrs().filter(id=>{const p=window.__test.pos(id);return p&&p.x>=0&&p.y>=0&&p.x<=g.width&&p.y<=g.height});return {neighbours: window.__test.nbrs().length, in_view: inV.length, in_view_unlabelled: inV.filter(id=>!L.has(id)).length, in_view_multi_unlabelled: inV.filter(id=>!L.has(id)&&!window.__test.leaf(id)).length}})()")
         pg.keyboard.press('Escape'); pg.wait_for_timeout(600)
         c['deselect_selected'] = pg.evaluate('window.__test.state.selected')
@@ -75,7 +99,7 @@ with sync_playwright() as p:
         c['combobox_expanded'] = pg.get_attribute('#q', 'aria-expanded')
         pg.keyboard.press('Enter'); pg.wait_for_timeout(900)
         c['search'] = pg.locator('#panel h2').first.inner_text(); c['primary_tags'] = pg.locator('#panel .prim').count()
-        c['acdp_metrics'] = pg.locator('#panel .metric').all_inner_texts()
+        c['acdp_panel'] = pg.evaluate(PANEL)
         c['unlabelled_neighbours_acdp'] = pg.evaluate("(()=>{const L=new Set(window.__labels||[]);const g=document.getElementById('graph').getBoundingClientRect();const inV=window.__test.nbrs().filter(id=>{const p=window.__test.pos(id);return p&&p.x>=0&&p.y>=0&&p.x<=g.width&&p.y<=g.height});return {neighbours: window.__test.nbrs().length, in_view: inV.length, in_view_unlabelled: inV.filter(id=>!L.has(id)).length, in_view_multi_unlabelled: inV.filter(id=>!L.has(id)&&!window.__test.leaf(id)).length}})()")
         pg.screenshot(path=f'{OUT}/{name}-search-select.png')
         pg.keyboard.press('Escape'); pg.wait_for_timeout(400)
@@ -89,7 +113,13 @@ with sync_playwright() as p:
         pg.goto(URL + f'/?node={nid}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(700)
         c['deeplink_query'] = pg.locator('#panel h2').first.inner_text()
         pg.goto(URL + f'/?view=bridges&node={nid}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(500)
-        c['deeplink_view'] = [pg.evaluate('window.__test.state.view'), pg.locator('#panel h2').first.inner_text()]
+        c['deeplink_legacy_bridges_view'] = [pg.evaluate('window.__test.state.view'), pg.locator('#panel h2').first.inner_text()]
+        pg.goto(URL + '/?view=race'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(400)
+        c['deeplink_race_view'] = pg.evaluate('window.__test.state.view')
+        gid = pg.evaluate("window.__test.byName('Green Party of Alameda County')")
+        pg.goto(URL + f'/?node={gid}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(800)
+        c['green_panel'] = pg.evaluate(PANEL); shoot_panel(pg, mob, f'{OUT}/{name}-panel-green.png')
+        if name in ('d1440', 'm390'): c['green_panel_text'] = pg.locator('#panel').inner_text()
         pg.goto(URL + f'/#node={nid}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(500)
         c['deeplink_legacy_hash'] = pg.locator('#panel h2').first.inner_text()
         # ---------- findings page ----------
@@ -101,7 +131,8 @@ with sync_playwright() as p:
            zero_cells: [...document.querySelectorAll('#overlap td[data-a]')].filter(t=>t.textContent.trim()==='0').length,
            jaccard_on_page: /jaccard|combined lists|either list/i.test(document.body.innerText),
            findings_words: (()=>{const a=document.querySelector('.story').cloneNode(true); return a.innerText.split(/\s+/).filter(Boolean).length})(),
-           heatmap_toggle: (()=>{const cell=()=>([...document.querySelectorAll('#heatmap td[title]')].find(t=>/^Avery Arbaugh & Vylma Ortiz/.test(t.title))||{}).title; const a=cell(); document.querySelector('[data-hm=conf]').click(); const b=cell(); document.querySelector('[data-hm=all]').click(); return [a,b]})()}))()""")
+           heatmap_toggle_present: !!document.querySelector('#hmmode'),
+           references: (()=>{const li=[...document.querySelectorAll('#refs ~ .reflist li[id^=ref-]')]; return {n: li.length, missing_url_or_date: li.filter(x=>!x.querySelector('a[href^=http]')||!/Accessed|not recorded/.test(x.innerText)).length}})()}))()""")
         pg.screenshot(path=f'{OUT}/{name}-findings-top.png'); pg.screenshot(path=f'{OUT}/{name}-findings-full.png', full_page=True)
         cell = pg.locator('#overlap td[data-a]').nth(3); cell.scroll_into_view_if_needed(); pg.wait_for_timeout(200)
         if mob: cell.tap()

@@ -13,11 +13,11 @@ Analysis (all on the undirected, unweighted projection):
     (degree-1 leaves cannot lie on a shortest path between other nodes, and they only inflate
     hub scores), and drop isolated candidates.
   * Louvain on the core graph: 2 independent sets of 20,000 runs, node and edge order shuffled
-    per run, each with and without the Probable edges. Pair co-assignment per set; complete linkage
-    at 0.75 (every pair together in >= 75% of runs); a coalition = candidates that stay together in
-    all four partitions (meet of the partitions).
+    per run. Pair co-assignment over all runs; complete linkage at 0.75 (every pair together in
+    >= 75% of runs).
+  * Only confirmed endorsements are edges. Rows rated "Probable" in the cleaned table are moved to
+    unverified_leads.csv and never enter the graph or the analysis.
     Leaves inherit the community of their single neighbour.
-  * Betweenness centrality (exact, normalized) on the core graph.
   * Endorser overlap between every pair of candidates (count + Jaccard).
   * ForceAtlas2 layout (fixed seed) on the full graph for a stable precomputed layout.
 """
@@ -74,6 +74,12 @@ def has(rows, *names):
 
 E = rd('endorsements.csv'); EN = rd('endorsers.csv'); CA = rd('candidates.csv')
 SM = rd('slate_members.csv', required=False); ES = rd('edge_sources.csv', required=False)
+# Only confirmed endorsements are edges: rows rated 'Probable' become unverified leads (published in unverified_leads.csv).
+PROB_ROWS = [r for r in E if 'probable' in col(r, 'Confidence').lower()]
+PROB_IDS = {col(r, 'edge_id') for r in PROB_ROWS}
+E = [r for r in E if r not in PROB_ROWS]
+ES = [r for r in ES if col(r, 'edge_id') not in PROB_IDS]
+PROB_PAIRS = collections.Counter((col(r, 'Endorser'), col(r, 'Endorses')) for r in PROB_ROWS)
 RACE_ORDER = ['Auditor', 'Council D1', 'Council D4', 'Council D7', 'Council D8', 'Rent Board', 'School Board']
 SLATE = 'Berkeley Right to Housing slate'
 
@@ -303,6 +309,7 @@ def analyse(g_, pool):
     Mall = np.vstack(Ms)
     return dict(nl=nl, ix=ix_, Ps=Ps, P=coassign(Mall, cols), Mall=Mall, parts=parts, kdist=kd)
 prob_edges = {(e['s'], e['t']) for e in edges if e['kind'] == 'endorsement' and 'probable' in (e.get('conf') or '').lower()}
+assert not prob_edges, 'probable rows must be moved to unverified leads before the analysis'
 with Pool(min(8, os.cpu_count() or 1)) as pool:
     AN = {'all': analyse(core, pool)}
     AN['conf'] = analyse(build_core(prob_edges), pool) if prob_edges else AN['all']
@@ -313,12 +320,11 @@ MALL = AN['all']['Mall']
 def together(a, b): return 1.0 if a == b else float(P_pool[tix[a], tix[b]]) if a in tix and b in tix else 0.0
 def together_conf(a, b): return 1.0 if a == b else float(P_conf[tix[a], tix[b]]) if a in tix and b in tix else 0.0
 def together_min(a, b): return min(together(a, b), together_conf(a, b))
-# every partition (2 pools x with/without probable edges); a coalition is reported only if ALL of them contain it
+# every partition (2 pools); with confirmed endorsements only, the 'conf' analysis is the same object as 'all'
 variant_parts = {f'{k}{i}': [c for c in AN[k]['parts'][i][0]] for k in ('all', 'conf') for i in range(len(SEED_BASES))}
 pools_agree = {k: {c for c in AN[k]['parts'][0][0] if len(c) > 1} == {c for c in AN[k]['parts'][1][0] if len(c) > 1} for k in ('all', 'conf')}
-# ONE rule for membership and for the margin flag: complete linkage on the pairwise MINIMUM of the with- and
-# without-Probable co-assignment matrices, so every pair inside a coalition lands together in >= ROBUST of runs
-# whether or not the probable endorsements are counted.
+# ONE rule for membership and for the margin flag: complete linkage on the co-assignment matrix (P_min == P_pool
+# now that only confirmed endorsements are edges), so every pair inside a coalition lands together in >= ROBUST of runs.
 P_min = np.minimum(P_pool, P_conf)
 min_part = avg_linkage(targets_core, P_min, ROBUST)
 meet = {}
@@ -412,50 +418,25 @@ for t in loose:
     loose_meta.append(dict(id=t, best=round(max(p_[0] for p_ in ps), 3) if ps else 0, bestConf=round(max(p_[1] for p_ in ps), 3) if ps else 0,
                            partners=[dict(t=o, p=v, pConf=vc) for v, vc, o in ps if max(v, vc) >= top - 0.01 or max(v, vc) >= ROBUST - BORDER][:6],
                            groupedIn=[dict(members=v_['members'], where=v_['where']) for v_ in variants_meta if t in v_['members']]))
-    # nearest coalition under the membership rule (weakest pair with its candidates), with and without Probable edges
+    # nearest coalition under the membership rule (weakest pair with its candidates), on the co-assignment matrix
     if bloc_list:
         cand_ = [(bi, min(together(t, o) for o in c), min(together_conf(t, o) for o in c)) for bi, c in enumerate(bloc_list)]
         bi, ma, mc = max(cand_, key=lambda x: max(x[1], x[2]))
         loose_meta[-1].update(nearBloc=bi, nearMin=round(ma, 4), nearMinConf=round(mc, 4))
 
-# ---------- betweenness + "spanning" endorsers ----------
-bc_core = nx.betweenness_centrality(core, normalized=True)
-bc_full = nx.betweenness_centrality(U, normalized=True)
+# ---------- per-node attributes ----------
 for n in nodes:
-    nodes[n]['bc'] = round(bc_core.get(n, 0.0), 6)
-    nodes[n]['bcFull'] = round(bc_full.get(n, 0.0), 6)
     nodes[n]['community'] = comm[n]
     nodes[n]['outDeg'] = D.out_degree(n); nodes[n]['inDeg'] = D.in_degree(n)
     nodes[n]['leaf'] = n in leaves
     if n in end_bloc_score: nodes[n]['blocScore'] = end_bloc_score[n]
     if is_ctarget(n) and n in core and comm[n] < 0: nodes[n]['loose'] = True
 
-# a "camp" is a robust coalition; endorsements of unattached candidates do not count as reaching a camp
-def reach_of(outs, grp):
-    gs = collections.Counter(grp[t] for t in outs if grp.get(t, -1) >= 0)
-    k = sum(gs.values())
-    return len(gs), (1 - sum((v / k) ** 2 for v in gs.values())) if k else 0.0
-def rank_competition(items, key):
-    items = sorted(items, key=key); ranks = {}; prev = None
-    for i, it in enumerate(items):
-        kk = key(it)[:-1]
-        if kk != prev: r_ = i + 1; prev = kk
-        ranks[it] = r_
-    return ranks
-cand_bridge = [n for n in nodes if (not nodes[n]['isTarget'] or nodes[n].get('analysisEndorser')) and D.out_degree(n) >= 2]
-tgrp = {t: comm[t] for t in targets_core}
-def reach_ranks(outs_map, grp):
-    rr = {n: reach_of(outs_map[n], grp) for n in cand_bridge}
-    # rank on the number of coalitions only: equal counts share a rank (ties are reported as ties)
-    return rank_competition(cand_bridge, lambda n: (-rr[n][0], nm(n))), rr
-base_outs = {n: sorted(D.successors(n)) for n in cand_bridge}
-rank_reach, rr0 = reach_ranks(base_outs, tgrp)
-rank_bc = rank_competition(cand_bridge, lambda n: (-round(bc_core.get(n, 0), 9), nm(n)))
+# ---------- coalition survival: drop 10% of endorsements, re-cluster from scratch, same rule ----------
 end_edges = [(e['s'], e['t']) for e in edges if e['kind'] == 'endorsement']
 mem_edges = [(e['s'], e['t']) for e in edges if e['kind'] == 'member']
-BOOT = 200; BOOT_RUNS = 1000; TOPK = 10
+BOOT = 200; BOOT_RUNS = 1000
 def boot_rep(seed):
-    """drop 10% of endorsements, re-cluster from scratch (BOOT_RUNS shuffled Louvain runs), recount coalitions reached"""
     rng_ = random.Random(1_000_003 * (seed + 1))
     keep = [e_ for e_ in end_edges if rng_.random() >= 0.10]
     G = nx.Graph(); G.add_nodes_from(nodes); G.add_edges_from(keep); G.add_edges_from(mem_edges)
@@ -465,19 +446,8 @@ def boot_rep(seed):
     M = np.array([louvain_shuffled((nl, el, seed * 10_000 + k))[0] for k in range(BOOT_RUNS)])
     tg = [t for t in targets_core if t in ixx]
     Pb = coassign(M, [ixx[t] for t in tg])
-    if prob_edges:   # same rule as the main analysis: pairwise minimum of with / without the probable endorsements
-        G2 = nx.Graph(); G2.add_nodes_from(nodes); G2.add_edges_from([e_ for e_ in keep if e_ not in prob_edges]); G2.add_edges_from(mem_edges)
-        dg2 = dict(G2.degree()); lv2 = {x for x in G2 if dg2[x] == 1 and not is_ctarget(x) and not nodes[x].get('isTarget')}
-        Gc2 = G2.subgraph([x for x in G2 if x not in lv2 and dg2[x] > 0]).copy()
-        nl2 = sorted(Gc2.nodes()); el2 = sorted(tuple(sorted(e_)) for e_ in Gc2.edges()); ix2 = {x: i for i, x in enumerate(nl2)}
-        M2 = np.array([louvain_shuffled((nl2, el2, seed * 10_000 + 5_000 + k))[0] for k in range(BOOT_RUNS)])
-        tg = [t for t in tg if t in ix2]
-        Pb = np.minimum(coassign(M, [ixx[t] for t in tg]), coassign(M2, [ix2[t] for t in tg]))
     groups = [c for c in avg_linkage(tg, Pb, ROBUST)[0] if len(c) >= 2]
     grp = {t: gi for gi, c in enumerate(groups) for t in c}
-    om = collections.defaultdict(list)
-    for s_, t_ in keep: om[s_].append(t_)
-    rk, rr = reach_ranks({n: om.get(n, []) for n in cand_bridge}, grp)
     fate = []   # for each reported coalition: 'intact' (same candidates together, nobody added), or the group(s) its members end up in
     for c in bloc_list:
         cs = [t for t in c if t in grp or t in ixx]
@@ -485,13 +455,12 @@ def boot_rep(seed):
         if len(gids) == 1 and -1 not in gids and set(groups[next(iter(gids))]) == set(cs): fate.append('intact')
         elif len(gids) == 1 and -1 not in gids: fate.append('joined:' + '|'.join(sorted(set(groups[next(iter(gids))]) - set(cs))))
         else: fate.append('split')
-    return [n for n in cand_bridge if rk[n] <= TOPK and rr[n][0] >= 2], len(groups), fate
+    return len(groups), fate
 with Pool(min(8, os.cpu_count() or 1)) as pool:
     boot = pool.map(boot_rep, range(BOOT), chunksize=4)
-top_reach = collections.Counter(n for b_, _, _ in boot for n in b_)
-boot_ngroups = collections.Counter(k_ for _, k_, _ in boot)
-boot_fate = [dict(collections.Counter(f_[bi] for _, _, f_ in boot)) for bi in range(len(bloc_list))]
-boot_intact_all = sum(all(x == 'intact' for x in f_) for _, _, f_ in boot)
+boot_ngroups = collections.Counter(k_ for k_, _ in boot)
+boot_fate = [dict(collections.Counter(f_[bi] for _, f_ in boot)) for bi in range(len(bloc_list))]
+boot_intact_all = sum(all(x == 'intact' for x in f_) for _, f_ in boot)
 def wilson(k_, n_, z=1.96):
     if not n_: return (0.0, 0.0)
     ph = k_ / n_; den = 1 + z * z / n_; cen = (ph + z * z / (2 * n_)) / den; hw = z * math.sqrt(ph * (1 - ph) / n_ + z * z / (4 * n_ * n_)) / den
@@ -502,91 +471,6 @@ for bi, cm in enumerate(comm_meta):   # data survival per coalition: intact in h
     lo_, hi_ = wilson(k_, BOOT)
     cm.update(intact=k_, intactShare=round(k_ / BOOT, 3), intactLo=round(lo_, 3), intactHi=round(hi_, 3), boots=BOOT,
               split=f_.get('split', 0), joiners=[dict(t=t_, n=n_) for t_, n_ in joiners.most_common(3)])
-rng = random.Random(20261103)
-top_bc = collections.Counter()
-for bi_ in range(100):   # betweenness: 100 edge resamples (no clustering involved)
-    keep = [e_ for e_ in end_edges if rng.random() >= 0.10]
-    G = nx.Graph(); G.add_edges_from(keep); G.add_edges_from(mem_edges)
-    dg = dict(G.degree()); lv = {x for x in G if dg[x] == 1 and x not in cand_ids}
-    Gc = G.subgraph([x for x in G if x not in lv]).copy()
-    b_ = nx.betweenness_centrality(Gc, normalized=True)
-    rkb = rank_competition([n for n in cand_bridge], lambda n: (-round(b_.get(n, 0), 9), nm(n)))
-    for n in cand_bridge:
-        if rkb[n] <= TOPK and b_.get(n, 0) > 0: top_bc[n] += 1
-# leave-one-edge-out for the coalition count: worst rank after deleting any single endorsement
-loo_worst = {}
-contenders = [n for n in cand_bridge if rank_reach[n] <= 25]
-for n in contenders:
-    worst = rank_reach[n]
-    for e_ in set(base_outs[n]):
-        om = dict(base_outs); om[n] = [t for t in base_outs[n] if t != e_]
-        rk, rr = reach_ranks(om, tgrp)
-        worst = max(worst, rk[n] if rr[n][0] >= 2 else 10**6)
-    loo_worst[n] = worst
-ROBUST_SHARE = 0.80
-bc_loo_worst = {n: rank_bc[n] for n in cand_bridge if bc_core.get(n, 0) > 0}
-bc_loo_edge = {}
-bc_loo_out = {}
-for e_ in end_edges:
-    if not (core.has_edge(*e_)): continue
-    Gc = core.copy(); Gc.remove_edge(*e_)
-    Gc.remove_nodes_from([x for x in list(Gc) if Gc.degree(x) == 0])
-    b_ = nx.betweenness_centrality(Gc, normalized=True)
-    rkb = rank_competition(cand_bridge, lambda n: (-round(b_.get(n, 0), 9), nm(n)))
-    for n in bc_loo_worst:
-        rnew = rkb[n] if b_.get(n, 0) > 0 else 10**6
-        if rnew > bc_loo_worst[n]: bc_loo_worst[n] = rnew; bc_loo_edge[n] = list(e_)
-        if rank_bc[n] <= TOPK and rnew > TOPK and n in e_: bc_loo_out.setdefault(n, []).append(dict(t=e_[1] if e_[0] == n else e_[0], rank=rnew if rnew < 10**6 else None))
-# ---- the same rankings without the edges rated "Probable" (clustering kept as is) ----
-prob_edges = {(e['s'], e['t']) for e in edges if e['kind'] == 'endorsement' and 'probable' in (e.get('conf') or '').lower()}
-def core_from(end_list):
-    G = nx.Graph(); G.add_nodes_from(nodes); G.add_edges_from(end_list); G.add_edges_from(mem_edges)
-    dg = dict(G.degree()); lv = {x for x in G if dg[x] == 1 and x not in cand_ids}
-    return G.subgraph([x for x in G if x not in lv and dg[x] > 0]).copy()
-conf_edges = [e_ for e_ in end_edges if e_ not in prob_edges]
-bc_conf = nx.betweenness_centrality(core_from(conf_edges), normalized=True) if prob_edges else bc_core
-rank_bc_conf = rank_competition(cand_bridge, lambda n: (-round(bc_conf.get(n, 0), 9), nm(n)))
-bc_loo_worst_conf = {}; bc_loo_edge_conf = {}
-if prob_edges:   # leave-one-edge-out on the confirmed-only graph too, for its top contenders
-    core_c = core_from(conf_edges)
-    bc_loo_worst_conf = {n: rank_bc_conf[n] for n in cand_bridge if bc_conf.get(n, 0) > 0 and rank_bc_conf[n] <= 15}
-    for e_ in conf_edges:
-        if not core_c.has_edge(*e_): continue
-        Gc = core_c.copy(); Gc.remove_edge(*e_)
-        Gc.remove_nodes_from([x for x in list(Gc) if Gc.degree(x) == 0])
-        b_ = nx.betweenness_centrality(Gc, normalized=True)
-        rkb = rank_competition(cand_bridge, lambda n: (-round(b_.get(n, 0), 9), nm(n)))
-        for n in bc_loo_worst_conf:
-            rnew = rkb[n] if b_.get(n, 0) > 0 else 10**6
-            if rnew > bc_loo_worst_conf[n]: bc_loo_worst_conf[n] = rnew; bc_loo_edge_conf[n] = list(e_)
-conf_outs = {n: [t for t in base_outs[n] if (n, t) not in prob_edges] for n in cand_bridge}
-rank_reach_conf, rr_conf = reach_ranks(conf_outs, tgrp)
-bridges = []
-for n in cand_bridge:
-    reach, pc = rr0[n]
-    if reach < 2 and bc_core.get(n, 0) <= 0: continue
-    br = dict(id=n, bc=nodes[n]['bc'], pc=round(pc, 3), reach=reach, deg=len(base_outs[n]), targets=sorted(base_outs[n], key=nm),
-              nLoose=len([t for t in base_outs[n] if tgrp.get(t, -1) < 0 and is_ctarget(t)]),
-              rankReach=rank_reach[n], rankBc=rank_bc[n] if bc_core.get(n, 0) > 0 else None,
-              topReach=round(top_reach[n] / BOOT, 3), topBc=round(top_bc[n] / 100, 3))
-    br['tie'] = sum(1 for m in cand_bridge if rank_reach[m] == rank_reach[n]) > 1
-    br['rankReachConf'] = rank_reach_conf[n]; br['reachConf'] = rr_conf[n][0]
-    br['rankBcConf'] = rank_bc_conf[n] if bc_conf.get(n, 0) > 0 else None
-    if n in bc_loo_worst_conf: br['bcLooWorstConf'] = bc_loo_worst_conf[n] if bc_loo_worst_conf[n] < 10**6 else None
-    if n in loo_worst: br['looWorst'] = loo_worst[n] if loo_worst[n] < 10**6 else None
-    if n in bc_loo_worst: br['bcLooWorst'] = bc_loo_worst[n] if bc_loo_worst[n] < 10**6 else None
-    if n in bc_loo_edge: br['bcLooEdge'] = bc_loo_edge[n]
-    if n in bc_loo_out: br['bcLooOut'] = sorted(bc_loo_out[n], key=lambda x: -(x['rank'] or 10**6))
-    # robust = holds in the resamples, after any single deletion, AND without the "probable" endorsements
-    br['robustReach'] = br['topReach'] >= ROBUST_SHARE and rank_reach[n] <= TOPK and (br.get('looWorst') or 10**6) <= TOPK and rank_reach_conf[n] <= TOPK and rr_conf[n][0] >= 2
-    br['robustBc'] = br['topBc'] >= ROBUST_SHARE and br['rankBc'] is not None and br['rankBc'] <= TOPK and (br.get('bcLooWorst') or 10**6) <= TOPK and (br['rankBcConf'] or 10**6) <= TOPK and (not prob_edges or (br.get('bcLooWorstConf') or 10**6) <= TOPK)
-    bridges.append(br)
-bridges.sort(key=lambda b_: (b_['rankReach'], -b_['deg'], nm(b_['id'])))
-cand_bc = sorted([dict(id=n, bc=nodes[n]['bc']) for n in nodes if is_ctarget(n) and nodes[n]['bc'] > 0], key=lambda x: -x['bc'])
-# endorsers (not candidates) who back 2+ candidates that sit in coalitions: how many back 2+ different coalitions?
-in_bloc_multi = [n for n in cand_bridge if sum(1 for t in base_outs[n] if tgrp.get(t, -1) >= 0) >= 2]
-crossers = [n for n in in_bloc_multi if rr0[n][0] >= 2]
-multi = in_bloc_multi
 
 # overlap between targets
 tg_all = [name2id[n] for n in cand_names]
@@ -763,8 +647,8 @@ summary = dict(
     # sources behind endorsement edges only (slate-membership links excluded), one count per distinct URL+page
     sourceTypeCounts=dict(collections.Counter(ty for (u_, pg_, ty) in {(x['u'], x.get('pg', ''), x['ty']) for e in edges if e['kind'] == 'endorsement' for x in e['src']})),
     edgeSourceTypeCounts=dict(collections.Counter(x['ty'] for e in edges if e['kind'] == 'endorsement' for x in e['src'])),
-    nMulti=len(multi), nCrossers=len(crossers), robustThreshold=ROBUST, nBlocs=len(bloc_list), nLoose=len(loose),
-    bootstrap=dict(resamples=BOOT, runsPerResample=BOOT_RUNS, bcResamples=100, dropShare=0.10, topK=TOPK, robustShare=ROBUST_SHARE),
+    robustThreshold=ROBUST, nBlocs=len(bloc_list), nLoose=len(loose),
+    bootstrap=dict(resamples=BOOT, runsPerResample=BOOT_RUNS, dropShare=0.10),
     typeOverrides=type_overrides,
     accessDates=sorted({x['at'] for e in edges for x in e['src'] if x['at']} or {e['date'] for e in edges if e['date']}),
     # count only (never used as edges): pamphlet 'I refer to the following residents' lists
@@ -841,8 +725,45 @@ for k in ['normal'] + list(_M):
     L = [_lab(_rgb(h)) if k == 'normal' else _lab(_sim(h, k)) for h in used_pal]
     pal_check[k] = round(min([math.dist(L[i], L[j]) for i in range(len(L)) for j in range(i+1, len(L))] or [0]), 1)
 summary['palette'] = dict(colors=used_pal, minDeltaE=pal_check)
-out = dict(urls=urls, urlLabels=[url_label[i_] for i_ in range(len(urls))], slateOverlap=slate_overlap, summary=summary, communities=comm_meta, loose=loose_meta, ties=ties, candBc=cand_bc, races=races,
-           nodes=list(nodes.values()), edges=edges, bridges=bridges, overlap=overlap, pairTogether=pair_together, pairTogetherConf={f'{a}|{b}': round(together_conf(a, b), 3) for i, a in enumerate(targets_core) for b in targets_core[i+1:]},
+# ---------- central reference list: one entry per source document (URL), numbered for the panel and /findings/ ----------
+def _vg_page(u):
+    m = re.search(r'#page=(\d+)$', u); return int(m.group(1)) if m else 0
+_ref_rows = []
+for i_, u in enumerate(urls):
+    used_by = [x for e in edges for x in e['src'] if x['u'] == i_]
+    dates = sorted({x['at'] for x in used_by if x.get('at')})
+    lab = url_label[i_]
+    if lab == 'Alameda County voter guide': title = f'Alameda County Voter Information Guide, November 3, 2026, p. {_vg_page(u)}' if _vg_page(u) else 'Alameda County Voter Information Guide, November 3, 2026'
+    elif lab.endswith(' campaign site') or lab.endswith(' site') or lab.startswith('Wayback') or lab in ('Ballotpedia', 'Bay Ballot', 'Berkeley Voter Guide Guru'): title = lab
+    else: title = f'{lab}: endorsements'
+    _ref_rows.append(dict(u=i_, title=title, url=u, at=dates, sortk=(lab.lower(), _vg_page(u), u)))
+_ref_rows.sort(key=lambda r_: r_['sortk'])
+refs = [dict(n=k_ + 1, u=r_['u'], title=r_['title'], url=r_['url'], at=r_['at']) for k_, r_ in enumerate(_ref_rows)]
+# hard data rule: every endorsement (and slate link) is traceable to at least one source with a URL and an access date
+_untraceable = [e['id'] for e in edges if not any(urls[x['u']] and (x.get('at') or e.get('date')) for x in e['src'])]
+_undated = [e['id'] for e in edges if not any(x.get('at') for x in e['src'])]
+if _untraceable or _undated: raise SystemExit(f'BUILD FAILED: edges without a dated source: {(_untraceable + _undated)[:10]}')
+print(f'references: {len(refs)}; every one of {len(edges)} edges has a dated source')
+
+# single condition (confirmed endorsements only): the with/without-probable twins are gone
+for cm in comm_meta:
+    cm['weakest'] = dict(a=cm['weakest']['a'], b=cm['weakest']['b'], p=cm['weakest']['pPooled']); cm.pop('meanConf', None)
+    cm['ambiguous'] = [dict(t=a_['t'], o=a_['o'], p=a_['p']) for a_ in cm['ambiguous']]
+for l in loose_meta:
+    l.pop('bestConf', None); l.pop('nearMinConf', None)
+    l['partners'] = [dict(t=p_['t'], p=p_['p']) for p_ in l['partners']]
+for v_ in variants_meta: v_.pop('meanConf', None)
+borderline_pairs = [dict(a=b_['a'], b=b_['b'], p=b_['p']) for b_ in borderline_pairs]
+summary['variantPartitions'] = {k_: v_ for k_, v_ in summary['variantPartitions'].items() if k_.startswith('all')}
+summary['refusedMerges'] = {k_: v_ for k_, v_ in summary['refusedMerges'].items() if k_ == 'all'}
+summary['poolsAgree'] = {k_: v_ for k_, v_ in summary['poolsAgree'].items() if k_ == 'all'}
+for e in edges: e.pop('conf', None); e.pop('confNote', None)
+summary['nProbableMoved'] = len(PROB_ROWS)
+# candidate headshots: public/photos/<node id>.webp, produced by scripts/photos.py (initials are shown when absent)
+_ph = os.path.join(here, '..', 'public', 'photos')
+photos = {f[:-5]: f'/photos/{f}' for f in sorted(os.listdir(_ph)) if f.endswith('.webp') and f[:-5] in nodes} if os.path.isdir(_ph) else {}
+out = dict(urls=urls, urlLabels=[url_label[i_] for i_ in range(len(urls))], refs=refs, photos=photos, slateOverlap=slate_overlap, summary=summary, communities=comm_meta, loose=loose_meta, ties=ties, races=races,
+           nodes=list(nodes.values()), edges=edges, overlap=overlap, pairTogether=pair_together,
            variants=variants_meta, borderlinePairs=borderline_pairs,
            coTargets=targets_core)
 
@@ -852,11 +773,11 @@ ALLOW = {
     'endorsements': ['edge_id', 'endorser_id', 'Endorser', 'Endorser type', 'Formality', 'Canonical title', 'Title as written (primary source)',
                      'Relationship', 'Direction', 'target_id', 'Endorses', 'Race', 'Ranking', 'Rank note', 'Source', 'Source type',
                      'Number of sources', 'All source types', 'page_section', 'voter_guide_page', 'statement_code', 'snapshot_path',
-                     'snapshot_sha256', 'accessed_at', 'Date accessed', 'Name(s) as written', 'Confidence', 'Confidence note',
+                     'snapshot_sha256', 'accessed_at', 'Date accessed', 'Name(s) as written',
                      'Corroborating (aggregator) sources'],
     'endorsers': ['endorser_id', 'Endorser', 'Endorser type', 'Canonical title', 'candidate_id', 'Candidates endorsed (count)',
-                  'Probable endorsements (count)', 'Candidates endorsed', 'Pamphlet references (count)', 'Partial slate members endorsed', 'Name variants seen'],
-    'candidates': ['candidate_id', 'Candidate', 'Race', 'Status', 'Campaign URL', 'Endorsements page', 'Endorsement count', 'of which Probable', 'Notes'],
+                  'Candidates endorsed', 'Pamphlet references (count)', 'Partial slate members endorsed', 'Name variants seen'],
+    'candidates': ['candidate_id', 'Candidate', 'Race', 'Status', 'Campaign URL', 'Endorsements page', 'Endorsement count', 'Notes'],
     'slate_members': ['slate_id', 'Slate', 'member_id', 'Member', 'Relationship', 'Source', 'Source type', 'page_section',
                       'voter_guide_page', 'statement_code', 'snapshot_path', 'snapshot_sha256', 'accessed_at'],
     'edge_sources': ['edge_id', 'source_no', 'source_id', 'endorser_id', 'Endorser', 'Endorses', 'Name as written', 'Title as written',
@@ -887,6 +808,24 @@ for base, cols_allowed in ALLOW.items():
     p_ = os.path.join(C, base + '.csv')
     if not allowed(base + '.csv') or not os.path.exists(p_): continue
     rows = rd(base + '.csv')
+    if base in ('endorsements', 'edge_sources'): rows = [r for r in rows if col(r, 'edge_id') not in PROB_IDS]
+    if base == 'endorsers':   # counts and lists without the rows moved to unverified leads
+        for r in rows:
+            nprob = sum(v_ for (en_, _), v_ in PROB_PAIRS.items() if en_ == r.get('Endorser'))
+            if nprob:
+                r['Candidates endorsed (count)'] = str(int(r['Candidates endorsed (count)']) - nprob)
+            for k_ in ('Candidates endorsed', 'Partial slate members endorsed'):
+                if r.get(k_): r[k_] = '; '.join(x for x in r[k_].split('; ') if '(Probable)' not in x)
+    if base == 'candidates':
+        for r in rows:
+            nprob = sum(v_ for (_, cn_), v_ in PROB_PAIRS.items() if cn_ == r.get('Candidate'))
+            if nprob: r['Endorsement count'] = str(int(r['Endorsement count']) - nprob)
+    if base == 'unverified_leads':
+        for r0 in PROB_ROWS:
+            rows.append({'Organization': col(r0, 'Endorser'), 'Candidate': col(r0, 'Endorses'), 'Race': col(r0, 'Race'),
+                         'Claim': f"Name on an unlabelled line just below {col(r0, 'Endorser')}'s {col(r0, 'Race')} entry; aggregators read it as an endorsement",
+                         'Lead type': 'Organization page (unlabelled line)', 'Lead URL': col(r0, 'Source'),
+                         'Status': f"Not confirmed by {col(r0, 'Endorser')} (not an edge)"})
     hk = [c_ for c_ in cols_allowed if rows and c_ in rows[0]]
     seen_r = set(); body = []
     for r in rows:
@@ -944,7 +883,7 @@ if allowed('validation_report.md') and os.path.exists(vr):
     else:
         print('validation_report.md not published (internal wording or inconsistent totals); its totals are cited in the methodology')
 if allowed('unverified_leads.csv') and os.path.exists(os.path.join(C, 'unverified_leads.csv')):
-    summary['nUnverifiedLeads'] = len(rd('unverified_leads.csv'))
+    summary['nUnverifiedLeads'] = len(rd('unverified_leads.csv')) + len(PROB_ROWS)
 out['summary']['downloads'] = copied
 blob = json.dumps(out, ensure_ascii=False, separators=(',', ':'))
 def check_published(name, text):
@@ -962,44 +901,15 @@ with open(os.path.join(args.out, 'graph.json'), 'w', encoding='utf-8') as f: f.w
 # console report
 print(f"nodes={len(nodes)} edges={len(edges)} core={core.number_of_nodes()}/{core.number_of_edges()} k-dist={dict(n_comm_dist)}")
 for cm in comm_meta:
-    print(f"  bloc {cm['id']}: weakest(min all/conf)={cm['weakest']['p']} all={cm['weakest']['pPooled']} conf={cm['weakest']['pConf']} mean={cm['mean']}/{cm['meanConf']} border={cm['borderline']} amb={[(nm(a['t']), nm(a['o']), a['p']) for a in cm['ambiguous']]} targets={[nm(t) for t in cm['targets']]} size={cm['size']}")
+    print(f"  bloc {cm['id']}: weakest={cm['weakest']['p']} mean={cm['mean']} border={cm['borderline']} amb={[(nm(a['t']), nm(a['o']), a['p']) for a in cm['ambiguous']]} targets={[nm(t) for t in cm['targets']]} size={cm['size']}")
 print('  pools agree:', pools_agree, 'boot groups', summary['bootGroups'])
 for k_, vp in summary['variantPartitions'].items(): print('   ', k_, vp)
 print('  refused merges:', summary['refusedMerges'])
-print('  variants:', [([nm(x) for x in v_['members']], v_['where'], v_['meanAll'], v_['meanConf']) for v_ in variants_meta])
-print('  borderline pairs:', [(nm(b_['a']), nm(b_['b']), b_['p'], b_['pConf']) for b_ in borderline_pairs])
+print('  variants:', [([nm(x) for x in v_['members']], v_['where'], v_['meanAll']) for v_ in variants_meta])
+print('  borderline pairs:', [(nm(b_['a']), nm(b_['b']), b_['p']) for b_ in borderline_pairs])
 print('  loose:', [(nm(l['id']), [(nm(p_['t']), p_['p']) for p_ in l['partners'][:2]]) for l in loose_meta])
 print('  ties:', [(t_['a'], t_['b'], t_['max']) for t_ in ties[:8]])
-print(f'crossers {len(crossers)}/{len(multi)} single={single} palette={pal_check}')
-for b_ in bridges[:15]:
-    print(f"  #{b_['rankReach']} {nm(b_['id'])} [{nodes[b_['id']]['type']}] reach={b_['reach']} deg={b_['deg']} top10={b_['topReach']} loo={b_.get('looWorst')} robust={b_['robustReach']} bcRank={b_['rankBc']} topBc={b_['topBc']}")
-print('conf-only diffs:', [(nm(b_['id']), b_['rankReach'], b_['rankReachConf'], b_['reach'], b_['reachConf'], b_['rankBc'], b_['rankBcConf'], b_.get('bcLooWorst'), b_.get('bcLooWorstConf')) for b_ in bridges if (b_['rankBc'] or 99) <= 15 and (b_['rankBc'] != b_['rankBcConf'] or b_['rankReach'] != b_['rankReachConf'])])
-print('bc top:', [(nm(b_['id']), b_['rankBc'], b_['topBc'], b_.get('bcLooWorst'), b_['robustBc']) for b_ in sorted([x for x in bridges if x['rankBc']], key=lambda x: x['rankBc'])[:10]])
-
 import subprocess as _sp
 _sp.run([sys.executable, os.path.join(here, 'render_static.py')], check=True)
 print('static overview written')
 
-# ---------- archive copy of the bridge numbers exactly as published (analysis/bridges_v7.txt) ----------
-try:
-    _ap = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'analysis')
-    os.makedirs(_ap, exist_ok=True)
-    L_ = ['Bridge rankings as published on the site (generated by site/scripts/build-data.py; do not edit).',
-          'Ranking set: endorsers who are not candidates (plus withdrawn candidates analysed as endorsers) with 2+ endorsements; competition ranks (ties share a rank).',
-          f'Betweenness on the core network (one-candidate endorsers removed). Coalitions: average linkage at {ROBUST:.2f} on {R:,} pooled Louvain runs.', '']
-    for tag, bcv, rk, loo, looe in (('all edges', bc_core, rank_bc, bc_loo_worst, bc_loo_edge), ('without Probable edges', bc_conf, rank_bc_conf, bc_loo_worst_conf, bc_loo_edge_conf)):
-        L_.append(f'RUN: {tag}')
-        top_ = sorted([n for n in cand_bridge if bcv.get(n, 0) > 0], key=lambda n: rk[n])[:15]
-        for n in top_: L_.append(f"{rk[n]} {nm(n)} {bcv[n]:.4f} deg {D.out_degree(n)}")
-        L_.append('--- leave-one-edge-out (top 10)')
-        for n in top_:
-            if rk[n] > TOPK: continue
-            w_ = loo.get(n); e_ = looe.get(n)
-            L_.append(f"{nm(n)} | base rank {rk[n]} | worst rank after removing one edge: {w_ if w_ and w_ < 10**6 else 'unranked'}" + (f" (edge to {nm(e_[1] if e_[0] == n else e_[0])})" if e_ else ''))
-        L_.append('')
-    L_.append('Coalitions reached (rank, endorser, reach all edges / without Probable, robust)')
-    for b_ in bridges:
-        if b_['rankReach'] <= TOPK: L_.append(f"={b_['rankReach']} {nm(b_['id'])} {b_['reach']}/{b_['reachConf']} robust={b_['robustReach']}")
-    open(os.path.join(_ap, 'bridges_v7.txt'), 'w', encoding='utf-8').write('\n'.join(L_) + '\n')
-except Exception as ex_:
-    print('could not write analysis/bridges_v7.txt:', ex_)

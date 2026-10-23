@@ -4,17 +4,15 @@ import Graph from 'graphology';
 import Sigma from 'sigma';
 import { createNormalizationFunction, graphExtent, matrixFromCamera, multiplyVec2 } from 'sigma/utils';
 import { createNodeBorderProgram } from '@sigma/node-border';
-import type { Data, GNode, GEdge, Bridge } from './types';
+import type { Data, GNode, GEdge } from './types';
 import {
-  commColor, commName, LETTERS, esc, index, bridgeSentence, listJoin, numWord, chip, nlink, typeGlyph, TYPE_ORDER, TYPE_RAMP,
-  blocName, campOf, nCamps, pct, raceShort, srcLabel, srcHref, shortName, surname, robustBridges, pairPct, onColor, plural, pctCut, weakPct, marginLabel, nearMisses,
-  intactRange, intactNote, intactWords,
+  commColor, commName, LETTERS, esc, index, listJoin, numWord, chip, nlink, typeGlyph, TYPE_ORDER, TYPE_RAMP,
+  blocName, pct, raceShort, shortName, surname, onColor, plural, pctCut, weakPct, marginLabel, nearMisses,
+  intactNote, intactWords, initials,
 } from './text';
-const isProb = (e: { conf?: string }) => /probable/i.test(e.conf || '');
 
-const PROB = '#1f6fd1', LEAF = '#c4c4c4', DIM = '#eeeeee', DIM_BORDER = '#d9d9d9';
-type View = 'coalitions' | 'bridges' | 'race';
-type BMode = 'reach' | 'bc' | 'cand';
+const LEAF = '#c4c4c4', DIM = '#f1f1f1', DIM_BORDER = '#e2e2e2';
+type View = 'coalitions' | 'race';
 const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector(s) as T;
 const fmtDate = (iso: string) => new Date(iso + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
 const norm = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
@@ -30,7 +28,7 @@ async function main() {
   await tick();
   const ix = index(d);
   const { byId } = ix;
-  const S = d.summary; const K = S.bootstrap.topK; const T = S.robustThreshold;
+  const S = d.summary; const T = S.robustThreshold;
   const edgesOut = new Map<string, GEdge[]>(); const edgesIn = new Map<string, GEdge[]>();
   const memberEdges = d.edges.filter((e) => e.kind === 'member');
   for (const e of d.edges) {
@@ -40,34 +38,23 @@ async function main() {
   }
   const isolated = d.nodes.filter((n) => n.inDeg + n.outDeg === 0 && !memberEdges.some((e) => e.s === n.id || e.t === n.id));
   const isoSet = new Set(isolated.map((n) => n.id));
-  // bridge lists
-  const reachList = d.bridges.filter((b) => b.reach >= 2).sort((a, b) => a.rankReach - b.rankReach || byId.get(a.id)!.name.localeCompare(byId.get(b.id)!.name));
-  const bcList = d.bridges.filter((b) => b.rankBc !== null).sort((a, b) => a.rankBc! - b.rankBc! || byId.get(a.id)!.name.localeCompare(byId.get(b.id)!.name));
-  const candList = d.candBc.map((c, i, arr) => ({ id: c.id, bc: c.bc, rank: 1 + arr.filter((x) => x.bc > c.bc + 1e-9).length }));
-  const robustTop = robustBridges(d);
-  const bridgeById = new Map(d.bridges.map((b) => [b.id, b]));
-
   const state = { view: 'coalitions' as View, selected: null as string | null, hovered: null as string | null, showAll: false,
-    colorBy: 'community' as 'community' | 'type', race: d.races.find((r) => r.race === 'Rent Board')?.race || d.races[0].race, bmode: 'reach' as BMode };
+    colorBy: 'community' as 'community' | 'type', race: d.races.find((r) => r.race === 'Rent Board')?.race || d.races[0].race };
 
   // ---------- graph ----------
   const g = new Graph({ type: 'directed', multi: false });
   const baseSize = (n: GNode) => (n.isTarget ? 4 + 2.1 * Math.log2(1 + n.inDeg) : n.leaf ? 2.5 : Math.min(8, 2.4 + 1.1 * Math.sqrt(n.outDeg)));
   for (const n of d.nodes) if (!isoSet.has(n.id)) g.addNode(n.id, { x: n.x, y: n.y, size: baseSize(n), label: n.name, color: commColor(n.community) });
-  for (const e of d.edges) if (g.hasNode(e.s) && g.hasNode(e.t) && !g.hasEdge(e.s, e.t)) g.addDirectedEdgeWithKey(e.id, e.s, e.t, { size: 1, kind: e.kind, prob: isProb(e) });
+  for (const e of d.edges) if (g.hasNode(e.s) && g.hasNode(e.t) && !g.hasEdge(e.s, e.t)) g.addDirectedEdgeWithKey(e.id, e.s, e.t, { size: 1, kind: e.kind });
 
   await tick();
   const raceSet = () => new Set(d.races.find((r) => r.race === state.race)?.candidates || []);
   const neighbors = (id: string) => (g.hasNode(id) ? new Set([id, ...g.neighbors(id)]) : new Set([id]));
-  const bridgeIds = () => (state.bmode === 'cand' ? candList.map((c) => c.id) : (state.bmode === 'bc' ? bcList : reachList).map((b) => b.id)).slice(0, narrowMQ.matches ? 5 : K);
-  const rankOf = (id: string) => (state.bmode === 'cand' ? candList.find((c) => c.id === id)?.rank : state.bmode === 'bc' ? bridgeById.get(id)?.rankBc : bridgeById.get(id)?.rankReach) ?? undefined;
-  const coalTopBridges = () => robustTop.slice(0, 10).map((b) => b.id);
   const isCand = (n: GNode) => n.isTarget && !n.analysisEndorser;
 
-  let FOCUS: Set<string> | null = null; let RACE_SHARED = new Set<string>(); let TOPB = new Set<string>();
+  let FOCUS: Set<string> | null = null; let RACE_SHARED = new Set<string>();
   function recompute() {
     const f = state.hovered || state.selected;
-    TOPB = new Set(state.view === 'bridges' ? bridgeIds() : state.view === 'coalitions' ? coalTopBridges() : []);
     RACE_SHARED = new Set();
     if (state.view === 'race') {
       const cnt = new Map<string, number>();
@@ -75,18 +62,13 @@ async function main() {
       for (const [m, k] of cnt) if (k >= 2) RACE_SHARED.add(m);
     }
     if (f) FOCUS = neighbors(f);
-    else if (state.view === 'bridges') {
-      const s = new Set<string>();
-      for (const b of TOPB) { s.add(b); if (state.bmode !== 'cand') for (const m of g.outNeighbors(b)) s.add(m); }
-      FOCUS = s;
-    } else if (state.view === 'race') {
+    else if (state.view === 'race') {
       const s = new Set<string>();
       for (const c of raceSet()) { if (!g.hasNode(c)) continue; s.add(c); for (const m of g.inNeighbors(c)) s.add(m); }
       for (const e of memberEdges) if (raceSet().has(e.s) || raceSet().has(e.t)) { s.add(e.s); s.add(e.t); }
       FOCUS = s;
     } else FOCUS = null;
   }
-  const crossEdge = (s: GNode, t: GNode) => s.community >= 0 && s.community !== t.community;
 
   const container = $('#graph');
   const BorderProgram = createNodeBorderProgram({
@@ -112,21 +94,20 @@ async function main() {
         r.color = LEAF; r.size = 2.5; r.zIndex = 0; r.borderSize = 0;
       }
       if (!inFocus) { r.color = DIM; r.borderColor = DIM_BORDER; r.borderSize = n.isTarget ? 1 : 0; r.zIndex = 0; }
-      if (TOPB.has(id) && !active) { r.size = Math.max(attr.size * 1.3, 6); r.zIndex = 4; }
       if (state.view === 'race' && !active && RACE_SHARED.has(id)) { r.size = Math.max(attr.size * 1.3, 5); r.zIndex = 4; }
-      if (active === id) r.zIndex = 5;
+      if (active === id) { r.zIndex = 6; r.size = Math.max(attr.size * 1.45, 9); r.borderSize = 2.5; r.borderColor = '#111111'; }
+      else if (active && inFocus) r.zIndex = Math.max(r.zIndex, 4);
       return r;
     },
     edgeReducer: (eid: string, attr: any) => {
       const s = g.source(eid), t = g.target(eid); const r: any = { ...attr };
-      const sn = byId.get(s)!, tn = byId.get(t)!;
+      const sn = byId.get(s)!;
       const active = state.hovered || state.selected;
       const isMember = attr.kind === 'member';
-      const r0 = edgeStyle(); if (attr.prob && !r.hidden) { r.color = PROB; r.size = Math.max(r.size ?? 1, 1.6); r.zIndex = 3; }
-      return r0 ? r : r;
+      edgeStyle(); return r;
       function edgeStyle() {
-      if (active) {
-        if (s === active || t === active) { r.color = isMember ? '#111' : crossEdge(sn, tn) ? '#1f1f1f' : '#555'; r.size = isMember ? 2.2 : 1.3; r.zIndex = 2; } else r.hidden = true;
+      if (active) {   // the selected node's own endorsements, drawn dark and heavy; every other line is hidden
+        if (s === active || t === active) { r.color = '#111111'; r.size = isMember ? 2.6 : 2; r.zIndex = 3; } else r.hidden = true;
         return r;
       }
       if (isMember) {
@@ -138,13 +119,10 @@ async function main() {
         if (!r.hidden) { r.color = 'rgba(150,150,150,0.35)'; r.size = 0.8; }
         return r;
       }
-      if (state.view === 'bridges') {
-        if (state.bmode !== 'cand' && TOPB.has(s)) { r.color = '#2b2b2b'; r.size = 1.3; r.zIndex = 2; } else { r.color = 'rgba(160,160,160,0.18)'; r.size = 0.7; }
-      } else if (state.view === 'race') {
+      if (state.view === 'race') {
         if (raceSet().has(t)) { r.color = RACE_SHARED.has(s) ? '#2b2b2b' : 'rgba(110,110,110,0.4)'; r.size = RACE_SHARED.has(s) ? 1.3 : 0.8; r.zIndex = RACE_SHARED.has(s) ? 2 : 1; }
         else r.hidden = true;
-      } else if (crossEdge(sn, tn)) { r.color = 'rgba(25,25,25,0.55)'; r.size = 1.2; r.zIndex = 2; }
-      else { r.color = 'rgba(90,90,90,0.35)'; r.size = 1; }
+      } else { r.color = 'rgba(90,90,90,0.38)'; r.size = 1; }
       return r;
       }
     },
@@ -206,7 +184,6 @@ async function main() {
   type Lab = { id: string; texts: string[]; force: boolean; weight: number; dim?: boolean };
   const lblName = (n: GNode) => (n.type === 'Slate' ? n.name : shortName(n));
   const altName = (n: GNode) => (n.type === 'Slate' ? 'Slate' : /Individual|official|Candidate/.test(n.type) ? surname(n) : lblName(n));
-  const ringNum = (id: string) => (state.view === 'bridges' ? rankOf(id) : coalTopBridges().indexOf(id) + 1);
   let peek: string | null = null;   // a node whose name is hovered or focused in the panel or legend
   function labelPlan(): Lab[] {
     const L: Lab[] = []; const narrow = narrowMQ.matches;
@@ -217,9 +194,7 @@ async function main() {
       L.push({ id, texts: tx, force, weight, dim });
     };
     if (active) { const n = byId.get(active)!; push(active, [n.name, lblName(n), altName(n)], true, 750); }
-    // numbered rings: names where they fit, at least the number
-    const tb = [...TOPB].filter((id) => !active || (FOCUS && FOCUS.has(id)));
-    tb.forEach((id) => { const n = byId.get(id)!; const k = ringNum(id); push(id, midMQ.matches && id !== peek ? [`${k}`] : [`${k}. ${lblName(n)}`, `${k}. ${altName(n)}`, `${k}`], true, 750); });
+    if (peek && peek !== active && (!FOCUS || FOCUS.has(peek))) { const n = byId.get(peek)!; push(peek, [lblName(n), altName(n)], true, 750); }
     // every candidate, at every width (dimmed when outside the focus)
     const cands = d.nodes.filter((n) => n.isTarget && g.hasNode(n.id)).sort((a, b) => Number(!!a.memberOf) - Number(!!b.memberOf) || b.inDeg - a.inDeg);
     const nbs = active && FOCUS ? [...FOCUS].filter((x) => x !== active) : [];
@@ -244,12 +219,22 @@ async function main() {
     const R = renderer;
     const vp = (id: string) => { if (!R) return pvPos.get(id) || null; const dd: any = R.getNodeDisplayData(id); if (!dd || dd.hidden) return null; const p = R.framedGraphToViewport({ x: dd.x, y: dd.y }); return { x: p.x, y: p.y, r: R.scaleSize(dd.size) }; };
     const active = state.hovered || state.selected;
-    // rings
-    const ringIds = new Set<string>([...TOPB]); if (active) ringIds.add(active);
+    // rings: endorsers shared within a race
+    const ringIds = new Set<string>();
     if (state.view === 'race' && !active) RACE_SHARED.forEach((x) => ringIds.add(x));
-    if (active) for (const x of [...ringIds]) if (x !== active && !(FOCUS && FOCUS.has(x))) ringIds.delete(x);
     octx.lineWidth = 1.8; octx.strokeStyle = '#111';
     for (const id of ringIds) { const p = vp(id); if (!p) continue; octx.beginPath(); octx.arc(p.x, p.y, p.r + 3, 0, Math.PI * 2); octx.stroke(); placed.push([p.x - p.r - 3, p.y - p.r - 3, p.x + p.r + 3, p.y + p.r + 3]); }
+    // the selected node: a soft halo, a white gap and a heavy dark ring
+    if (active) {
+      const p = vp(active);
+      if (p) {
+        const R0 = p.r + 4;
+        octx.lineWidth = 9; octx.strokeStyle = 'rgba(255, 184, 0, 0.5)'; octx.beginPath(); octx.arc(p.x, p.y, R0 + 8.5, 0, Math.PI * 2); octx.stroke();
+        octx.lineWidth = 4; octx.strokeStyle = '#ffffff'; octx.beginPath(); octx.arc(p.x, p.y, R0, 0, Math.PI * 2); octx.stroke();
+        octx.lineWidth = 3; octx.strokeStyle = '#111111'; octx.beginPath(); octx.arc(p.x, p.y, R0 + 3, 0, Math.PI * 2); octx.stroke();
+        placed.push([p.x - R0 - 5, p.y - R0 - 5, p.x + R0 + 5, p.y + R0 + 5]);
+      }
+    }
     // coalition letters inside big nodes (colour-blind redundancy)
     if (state.colorBy === 'community') {
       for (const n of d.nodes) {
@@ -404,180 +389,142 @@ async function main() {
     return `<div class="tbar" role="img" aria-label="${esc([...m].map(([t, v]) => `${v} ${t}`).join(', '))}">${TYPE_ORDER.filter((t) => m.has(t)).map((t) => `<span style="flex:${m.get(t)};background:${TYPE_RAMP[t]}" title="${esc(t)}: ${m.get(t)}"></span>`).join('')}</div>`;
   };
   const typeKey = (types: string[]) => `<p class="tkey small">${TYPE_ORDER.filter((t) => types.includes(t)).map((t) => `<span><i style="background:${TYPE_RAMP[t]}"></i>${esc(t)}</span>`).join('')}</p>`;
-  function panelDates(es: GEdge[]) {
-    const ds = new Set(es.flatMap((e) => e.src.map((x) => x.at || e.date)).filter(Boolean));
-    return ds.size === 1 ? [...ds][0] : null;
+  // ---------- references: one number per source document, shared with the References list on /findings/ ----------
+  const refByU = new Map(d.refs.map((r) => [r.u, r]));
+  const fmtDates = (at: string[]) => (!at.length ? '' : at.length === 1 ? fmtDate(at[0]) : `${fmtDate(at[0])} to ${fmtDate(at[at.length - 1])}`);
+  const refNums = (e: GEdge) => [...new Set(e.src.map((x) => refByU.get(x.u)?.n).filter((n): n is number => !!n))].sort((a, b) => a - b);
+  const marker = (ns: number[]) => (ns.length ? `<sup class="rm">[${ns.map((n) => `<a href="#pref-${n}" data-ref="${n}" aria-label="Reference ${n}">${n}</a>`).join(',')}]</sup>` : '');
+  function refList(ns: Set<number>) {
+    const rs = d.refs.filter((r) => ns.has(r.n));
+    if (!rs.length) return '';
+    return `<details class="grp refs" open><summary><h3>References <span class="cnt">${rs.length}</span></h3></summary><ol class="reflist">${rs.map((r) => `<li id="pref-${r.n}" value="${r.n}"><span class="rt">${esc(r.title)}</span> <a class="ru" href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.url.replace(/^https?:\/\/(www\.)?/, ''))}</a> <span class="acc">${r.at.length ? `Accessed ${esc(fmtDates(r.at))}.` : 'Access date not recorded; corroborating source only.'}</span></li>`).join('')}</ol></details>`;
   }
-  function sourcesHtml(e: GEdge, oneDate: string | null) {
-    const seenL = new Set<string>();
-    const src = e.src.filter((x) => { const k = `${srcLabel(d.urls[x.u])}|${x.pg || ''}`; if (seenL.has(k)) return false; seenL.add(k); return true; });
-    return `<span class="srcs">${src.map((x) => {
-      const u = d.urls[x.u];
-      const acc = !oneDate && x.at ? ` <span class="acc">(${esc(fmtDate(x.at))})</span>` : '';
-      return `<span><a href="${esc(srcHref(u, x.pg))}" target="_blank" rel="noopener" title="${esc(x.ty || '')}">${esc(srcLabel(u))}${x.pg ? `, p. ${esc(x.pg)}` : ''}<span aria-hidden="true"> ↗</span></a>${x.pr ? ' <span class="prim">primary</span>' : ''}${x.sh ? ' <span class="acc">(screenshot archived)</span>' : ''}${acc}</span>`;
-    }).join('')}</span>`;
-  }
-  const srcKey = (e: GEdge) => e.src.map((x) => `${x.u}|${x.pg || ''}`).sort().join(',');
-  function edgeList(es: GEdge[], side: (e: GEdge) => string, showTitle: boolean, oneDate: string | null) {
-    const same = es.length > 1 && es.every((e) => srcKey(e) === srcKey(es[0])) && es[0].src.length > 0;
-    const rows = es.map((e) => edgeRow(e, side(e), showTitle, oneDate, same)).join('');
-    return `${same ? `<p class="small srcall">Source for all ${es.length}: ${sourcesHtml(es[0], oneDate)}</p>` : ''}<ul class="elist">${rows}</ul>`;
-  }
-  function edgeRow(e: GEdge, otherId: string, showTitle: boolean, oneDate: string | null, noSrc = false) {
+  // ---------- avatars: a candidate headshot when one exists, otherwise initials ----------
+  const photos = d.photos || {};
+  const avatar = (n: GNode, size: 'lg' | 'sm' = 'lg') => (photos[n.id]
+    ? `<img class="av av-${size}" src="${esc(photos[n.id])}" alt="" width="${size === 'lg' ? 48 : 24}" height="${size === 'lg' ? 48 : 24}" loading="lazy" decoding="async">`
+    : `<span class="av av-${size} av-i" aria-hidden="true" style="--c:${n.community >= 0 ? commColor(n.community) : '#e9e9e9'};--t:${n.community >= 0 ? onColor(commColor(n.community)) : '#333'}">${esc(initials(n))}</span>`);
+  // endorser groups: the key names first (officials, parties, clubs, unions, organizations, candidates), then everyone else
+  const GROUPS: { label: string; types: string[]; key: boolean }[] = [
+    { label: 'Elected officials', types: ['Current elected official'], key: true },
+    { label: 'Former elected officials', types: ['Former elected official'], key: true },
+    { label: 'Parties', types: ['Political party'], key: true },
+    { label: 'Democratic clubs', types: ['Democratic club'], key: true },
+    { label: 'Unions', types: ['Union'], key: true },
+    { label: 'Organizations', types: ['Political/advocacy org'], key: true },
+    { label: 'Candidates and slates', types: ['Candidate', 'Candidate (withdrawn)', 'Slate'], key: true },
+    { label: 'Everyone else', types: ['Individual'], key: false },
+  ];
+  const groupOf = (t: string) => GROUPS.find((x) => x.types.includes(t)) || GROUPS[GROUPS.length - 1];
+  const rankTxt = (e: GEdge) => (e.rel !== 'Endorses' && e.kind !== 'member' ? ` <span class="rk"${e.rankNote ? ` title="${esc(e.rankNote)}"` : ''}>${esc(e.rel.replace(/^Ranked /, 'ranked '))}</span>` : '');
+  const srcKey = (e: GEdge) => refNums(e).join(',');
+  /** one shared source for every edge in the list? then it is cited once, in the banner */
+  const sharedRef = (es: GEdge[]) => (es.length > 1 && es.every((e) => srcKey(e) === srcKey(es[0])) && srcKey(es[0]) ? refNums(es[0]) : null);
+  const bannerSrc = (ns: number[] | null) => (ns ? `<p class="bsrc">Source: ${marker(ns)} ${ns.map((n) => esc(d.refs[n - 1].title)).join('; ')}</p>` : '');
+  /** a key endorser: icon, name, a short description, ranking, reference marker */
+  function keyRow(e: GEdge, otherId: string, cite: boolean) {
     const o = N(otherId);
-    const badges: string[] = [];
-    if (e.rel !== 'Endorses' && e.kind !== 'member') badges.push(`<span class="badge"${e.rankNote ? ` title="${esc(e.rankNote)}"` : ''}>${esc(e.rel)}</span>`);
-    const title = showTitle && e.title ? `<span class="ttl">${esc(e.title)}</span>` : '';
-    const rn = e.rankNote ? `<span class="asw">${esc(e.rankNote)}</span>` : '';
-    const asw = e.asw && showTitle && !e.asw.split(' | ').every((a) => a === o.name) ? `<span class="asw">as written: ${esc(e.asw)}</span>` : '';
-    const prob = isProb(e) ? `<span class="badge prob">Probable</span>${e.confNote ? `<span class="asw">${esc(e.confNote)}</span>` : ''}` : '';
-    return `<li>${typeGlyph(o.type)}${nlink(o)} ${chip(o.community, commName(ix, d, o.community))} ${badges.join('')}${prob}${title}${rn}${asw}${noSrc ? '' : sourcesHtml(e, oneDate)}</li>`;
+    const desc = e.title || o.title;
+    return `<li>${typeGlyph(o.type)}<span class="kr">${nlink(o)}${rankTxt(e)}${cite ? marker(refNums(e)) : ''}${desc ? `<span class="desc">${esc(desc)}</span>` : ''}</span></li>`;
   }
-  function groupedIn(id: string, oneDate: string | null) {
-    const es = (edgesIn.get(id) || []).slice();
-    const groups = new Map<string, GEdge[]>();
-    for (const e of es) { const t = N(e.s).type; if (!groups.has(t)) groups.set(t, []); groups.get(t)!.push(e); }
-    return TYPE_ORDER.filter((t) => groups.has(t)).map((t) => {
-      const list = groups.get(t)!.sort((a, b) => (N(b.s).outDeg - N(a.s).outDeg) || N(a.s).name.localeCompare(N(b.s).name));
-      const LIM = 12;
-      const rows = list.map((e, i) => edgeRow(e, e.s, true, oneDate).replace('<li>', i >= LIM ? '<li class="more" hidden>' : '<li>')).join('');
-      const more = list.length > LIM ? `<button class="showmore">Show ${list.length - LIM} more</button>` : '';
-      return `<h4>${typeGlyph(t)}${esc(t)} <span class="cnt">${list.length}</span></h4><ul class="elist">${rows}</ul>${more}`;
+  const LIM = 10;
+  function endorserGroups(es: GEdge[], cite: boolean) {
+    const by = new Map<string, GEdge[]>();
+    for (const e of es) { const gl = groupOf(N(e.s).type).label; if (!by.has(gl)) by.set(gl, []); by.get(gl)!.push(e); }
+    return GROUPS.filter((gr) => by.has(gr.label)).map((gr) => {
+      const list = by.get(gr.label)!.sort((a, b) => (N(b.s).outDeg - N(a.s).outDeg) || N(a.s).name.localeCompare(N(b.s).name));
+      const head = `<summary>${typeGlyph(gr.types[0])}<span>${gr.label}</span> <span class="cnt">${list.length}</span></summary>`;
+      if (!gr.key) {   // everyone else: a compact run of names
+        const names = list.slice().sort((a, b) => N(a.s).name.localeCompare(N(b.s).name)).map((e) => `<span class="ci">${nlink(N(e.s))}${rankTxt(e)}${cite ? marker(refNums(e)) : ''}</span>`).join('');
+        return `<details class="grp" open>${head}<p class="clist">${names}</p></details>`;
+      }
+      const rows = list.map((e, i) => keyRow(e, e.s, cite).replace('<li>', i >= LIM ? '<li class="more" hidden>' : '<li>')).join('');
+      const more = list.length > LIM ? `<button class="showmore">Show all ${list.length}</button>` : '';
+      return `<details class="grp" open>${head}<ul class="klist">${rows}</ul>${more}</details>`;
     }).join('');
   }
-  /** closest partners of a candidate: the top 3 with all endorsements plus the top ones without the probable ones (max 4) */
-  function closest(id: string) {
-    const ps = d.coTargets.filter((t) => t !== id).map((t) => ({ t, p: ix.together(id, t), pConf: togetherConf(id, t) }));
-    const a = ps.slice().sort((x, y) => y.p - x.p).slice(0, 3), b = ps.slice().sort((x, y) => y.pConf - x.pConf).slice(0, 3);
-    const out: typeof ps = [];
-    for (const x of [...a, ...b]) if (!out.some((o) => o.t === x.t) && out.length < 4) out.push(x);
-    return out.filter((x) => Math.max(x.p, x.pConf) > 0);
+  /** what a node endorses (or its slate links): one row per target, with race and reference marker */
+  function targetRows(es: GEdge[], cite: boolean) {
+    return `<ul class="klist">${es.slice().sort((a, b) => (N(a.t).race || '').localeCompare(N(b.t).race || '') || N(a.t).name.localeCompare(N(b.t).name)).map((e) => {
+      const t = N(e.t);
+      return `<li>${typeGlyph(t.type)}<span class="kr">${nlink(t)}${t.race && t.type !== 'Slate' ? ` <span class="race-tag">${esc(raceShort(t.race))}</span>` : ''}${rankTxt(e)}${cite ? marker(refNums(e)) : ''}${e.rankNote ? `<span class="desc">${esc(e.rankNote)}</span>` : ''}</span></li>`;
+    }).join('')}</ul>`;
   }
-  const togetherConf = (a: string, b: string) => (a === b ? 1 : d.pairTogetherConf[`${a}|${b}`] ?? d.pairTogetherConf[`${b}|${a}`] ?? 0);
+  /** candidates whose endorsements most resemble this one's: the share of clustering runs that group the two together */
+  function closest(id: string, k = 3) {
+    return d.coTargets.filter((t) => t !== id).map((t) => ({ t, p: ix.together(id, t) })).sort((x, y) => y.p - x.p).slice(0, k).filter((x) => x.p > 0);
+  }
+  const simLine = (id: string) => {
+    const cl = closest(id); if (!cl.length) return '';
+    return ` Most similarly endorsed: ${cl.map((x, i) => `${nlink(N(x.t))} <span class="pc">${pct(x.p)}</span>${i < cl.length - 1 ? ',' : ''}`).join(' ')}.`;
+  };
   function placement(n: GNode) {
-    if (isCand(n)) {
-      if (n.community >= 0) { const c = d.communities[n.community]; return `${chip(n.community)} In coalition <strong>${esc(LETTERS[c.id])} (${esc(blocName(ix, c))})</strong>. Weakest pair: ${weakPct(d, c)}, ${marginLabel(d, c)}.`; }
-      const l = d.loose.find((x) => x.id === n.id);
-      if (l) {
-        const nmiss = nearMisses(d).find((x) => x.l.id === n.id);
-        return `${chip(-1)} In no coalition.${nmiss ? ` Falls just short of ${LETTERS[nmiss.c]}: weakest pair ${pctCut(nmiss.v, T)}.` : ''} Lands most often with ${listJoin(closest(n.id).map((p) => `${esc(N(p.t).name)} (${pairPct(p.p, p.pConf, T)})`))}.${closest(n.id).some((p) => pairPct(p.p, p.pConf, T).includes('–')) ? ' <span class="muted">Ranges: with and without the probable endorsements.</span>' : ''}`;
+    const runs = `<span class="pnote">Percent: share of ${S.nRuns.toLocaleString('en-US')} clustering runs that group the two together.</span>`;
+    if (n.isTarget && !n.analysisEndorser) {
+      if (n.community >= 0) {
+        const c = d.communities[n.community]; const others = c.targets.filter((t) => t !== n.id).map(N);
+        return `<p class="place">${chip(n.community)} In coalition ${LETTERS[c.id]} with ${listJoin(others.map((o) => nlink(o)))}.${simLine(n.id)}</p>${runs}`;
       }
-      return n.memberOf ? `${chip(n.community)} No endorsers of their own; placed by the slate link${n.community >= 0 ? ` (coalition ${LETTERS[n.community]})` : ''}.` : `${chip(-1)} No endorsements recorded.`;
+      if (!g.hasNode(n.id) || !d.coTargets.includes(n.id)) return n.memberOf ? '' : `<p class="place">${chip(-1)} Not in any coalition.</p>`;
+      return `<p class="place">${chip(-1)} Not in any coalition.${simLine(n.id)}</p>${runs}`;
     }
-    if (n.leaf) return `${chip(n.community)} Backs one candidate only${n.community >= 0 ? `, in coalition ${LETTERS[n.community]}` : ''}.`;
-    if (n.community >= 0 && !n.isTarget || (n.analysisEndorser && n.community >= 0)) return `${chip(n.community)} Lands with coalition <strong>${LETTERS[n.community]} (${esc(blocName(ix, d.communities[n.community]))})</strong> in ${pct(n.blocScore ?? 0)} of runs, on average.`;
-    return `${chip(-1)} In no coalition${n.blocScore ? ` (closest: ${pct(n.blocScore)} of runs)` : ''}.`;
-  }
-  function bridgeMetrics(n: GNode) {
-    const b = bridgeById.get(n.id);
-    if (isCand(n)) {
-      const c = candList.find((x) => x.id === n.id);
-      return c ? `<p class="metric">Candidate betweenness: <strong>#${c.rank}</strong> of ${candList.length} candidates and slates. Candidates rank high because their endorsers connect through them.</p>` : '';
-    }
-    if (!b) return '';
-    const sure = (ok: boolean) => (ok ? '<span class="ok">holds up</span>' : '<span class="unsure">less certain</span>');
-    const why = (r: [boolean, string][]) => { const f = r.filter((x) => x[0]).map((x) => x[1]); return f.length ? `; but it ${listJoin(f)}` : ''; };
-    const _bcWhy = b.robustBc ? '' : why([
-      [b.topBc < 0.8, `is top ${K} in only ${pct(b.topBc)} of resamples`],
-      [(b.bcLooWorst ?? 1e6) > K, `falls to ${b.bcLooWorst ? '#' + b.bcLooWorst : 'zero'} when one endorsement is removed`],
-      [(b.rankBcConf ?? 1e6) > K, `ranks ${b.rankBcConf ? '#' + b.rankBcConf : 'nowhere'} without the probable endorsements`],
-      [(b.bcLooWorstConf ?? 1e6) > K && (b.rankBcConf ?? 1e6) <= K, `falls to ${b.bcLooWorstConf ? '#' + b.bcLooWorstConf : 'zero'} when the probable endorsements and one other endorsement are removed`],
-    ]);
-    const reachWhy = b.robustReach ? '' : why([
-      [b.topReach < 0.8, `is top ${K} in only ${pct(b.topReach)} of resamples`],
-      [(b.looWorst ?? 1e6) > K, `falls to ${b.looWorst ? '#' + b.looWorst : 'one coalition'} when one endorsement is removed`],
-      [(b.rankReachConf ?? 1e6) > K, `ranks #${b.rankReachConf} without the probable endorsements`],
-    ]);
-    return `<p class="metric">Backs candidates in <strong>${b.reach} of ${nCamps(d)} coalitions</strong> · rank #${b.rankReach}${b.tie ? ' (tie)' : ''}${b.rankReachConf != null && b.rankReachConf !== b.rankReach ? ` (#${b.rankReachConf} excluding probable endorsements)` : ''} · ${sure(b.robustReach)} (top ${K} in ${pct(b.topReach)} of resamples${b.looWorst ? `; worst rank after removing any one endorsement: #${b.looWorst}` : ''}${reachWhy}).</p>${b.rankBc ? `<p class="metric small">Betweenness: #${b.rankBc}.${b.rankBcConf != null && b.rankBcConf !== b.rankBc ? ` Without the probable endorsements, #${b.rankBcConf}${b.bcLooWorstConf && b.bcLooWorstConf > b.rankBcConf ? `; drop one more, #${b.bcLooWorstConf}` : ''}.` : b.bcLooWorst && b.bcLooWorst > b.rankBc ? ` Drop one endorsement, #${b.bcLooWorst}.` : ''} ${b.robustBc ? '<span class="ok">Holds up.</span>' : '<span class="unsure">Less certain.</span>'}</p>` : ''}`;
+    if (n.leaf) return '';
+    if (n.community >= 0) return `<p class="place">${chip(n.community)} Clusters with coalition ${LETTERS[n.community]} (${esc(blocName(ix, d.communities[n.community]))}) <span class="pc">${pct(n.blocScore ?? 0)} of runs</span>.</p>`;
+    return `<p class="place">${chip(-1)} Not in any coalition.</p>`;
   }
   function nodePanel(id: string) {
     const n = N(id);
     const outs = edgesOut.get(id) || []; const ins = edgesIn.get(id) || [];
-    const struct = memberEdges.filter((e) => e.s === id || e.t === id);
-    const oneDate = panelDates([...outs, ...ins, ...struct]);
-    const tkey = (t: string) => t.toLowerCase().replace(/\bd-?(\d+)\b/g, 'district $1').replace(/\b(city|of|the)\b/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
-    const titles: string[] = [];
-    const words = (t: string) => tkey(t).split(' ');
-    const covered = (t: string) => titles.some((x) => { const kw = new Set(words(x)); const w = words(t); return w.filter((y) => kw.has(y)).length >= 0.75 * w.length; });
-    for (const t of [n.title, ...outs.map((e) => e.title)].filter(Boolean)) if (!covered(t)) titles.push(t);
-    const sentence = outs.length ? `<p class="sentence">${bridgeSentence(ix, d, id)}</p>` : '';
-    const notes = (n.notes || []).map((x) => (x.url ? `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.text)}</a>` : esc(x.text))).join(' ');
-    let html = `<button class="back" data-back>← Back to ${state.view === 'race' ? 'race view' : state.view}</button>
-      <div class="ncard"><p class="ntype">${typeGlyph(n.type)}${esc(n.type)}${n.race ? ` · ${esc(n.race)}` : ''}</p>
-      <h2 tabindex="-1" id="ntitle">${esc(n.name)}</h2>
-      ${n.typeNote ? `<p class="muted small">${esc(n.typeNote)}</p>` : ''}${notes ? `<p class="small">${notes}</p>` : ''}
-      ${titles.length ? `<p class="ttl-main">${titles.slice(0, 2).map(esc).join(' · ')}</p>` : ''}
-      <p class="meta">${placement(n)}</p>
-      ${n.campaignUrl ? `<p class="meta"><a href="${esc(n.campaignUrl)}" target="_blank" rel="noopener">Campaign site ↗</a>${n.endorsementsPage && n.endorsementsPage !== n.campaignUrl ? ` · <a href="${esc(n.endorsementsPage)}" target="_blank" rel="noopener">Endorsements page ↗</a>` : ''}</p>` : ''}
-      ${bridgeMetrics(n)}${sentence}${oneDate ? `<p class="small muted">All sources below accessed ${esc(fmtDate(oneDate))}.</p>` : ''}</div>`;
     const isMem = (e: GEdge) => /member/i.test(e.rel);
-    const pIn = ins.filter(isProb).length, pOut = outs.filter(isProb).length;
-
-    const groups: [string, GEdge[], 's' | 't'][] = [
+    const used = new Set<number>(); const use = (es: GEdge[]) => es.forEach((e) => refNums(e).forEach((x) => used.add(x)));
+    const notes = (n.notes || []).filter((x) => !/^No endorsements recorded/.test(x.text)).map((x) => (x.url ? `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.text)}</a>` : esc(x.text))).join(' ');
+    const isC = n.isTarget && !n.analysisEndorser;
+    const sub = [n.type === 'Candidate' || n.type === 'Slate' ? '' : n.type, n.race, !isC && n.title ? n.title : ''].filter(Boolean).join(' · ');
+    const site = n.campaignUrl ? `<a class="site" href="${esc(n.campaignUrl)}" target="_blank" rel="noopener">Campaign site<span aria-hidden="true"> ↗</span></a>` : '';
+    let html = `<button class="back" data-back>← Back to ${state.view === 'race' ? 'race view' : 'coalitions'}</button>
+      <header class="nhead">${isC || n.type === 'Slate' ? avatar(n) : `<span class="av av-lg av-t" aria-hidden="true">${typeGlyph(n.type)}</span>`}<div><h2 tabindex="-1" id="ntitle">${esc(n.name)}</h2><p class="ntype">${esc(sub || n.type)}${site ? ` · ${site}` : ''}</p></div></header>`;
+    // 1. who endorses this candidate (or, for an endorser, whom it endorses)
+    const lead = (label: string, es: GEdge[], body: (cite: boolean) => string) => {
+      const sr = sharedRef(es); use(es);
+      return `<section class="lead"><div class="banner"><p class="bn"><strong>${label} ${es.length}</strong></p>${bannerSrc(sr)}</div>${body(!sr)}</section>`;
+    };
+    if (ins.length) html += lead('Endorsed by', ins, (cite) => endorserGroups(ins, cite));
+    else if (isC) html += `<div class="banner"><p class="bn"><strong>No endorsements recorded</strong></p></div>`;
+    if (outs.length) html += lead(ins.length ? 'Also endorses' : 'Endorses', outs, (cite) => targetRows(outs, cite));
+    if (notes) html += `<p class="small notes">${notes}</p>`;
+    if (n.typeNote) html += `<p class="small muted">${esc(n.typeNote)}</p>`;
+    // slate links (not endorsements)
+    const links: [string, GEdge[], 's' | 't'][] = [
       ['Members', memberEdges.filter((e) => e.t === id && isMem(e)), 's'], ['Nominated by', memberEdges.filter((e) => e.t === id && !isMem(e)), 's'],
       ['Member of', memberEdges.filter((e) => e.s === id && isMem(e)), 't'], ['Nominated', memberEdges.filter((e) => e.s === id && !isMem(e)), 't'],
     ];
-    for (const [h, es, side] of groups) if (es.length) html += `<h3>${h} <span class="cnt">${es.length}</span> <span class="small muted nt">not an endorsement</span></h3>${edgeList(es, (e) => (side === 's' ? e.s : e.t), false, oneDate)}`;
-    if (outs.length) html += `<h3>Endorses <span class="cnt">${outs.length}</span>${pOut ? ` <span class="small muted nt">${pOut} probable</span>` : ''}</h3>${edgeList(outs, (e) => e.t, false, oneDate)}`;
-    if (ins.length) html += `<h3>Endorsed by <span class="cnt">${ins.length}</span>${pIn ? ` <span class="small muted nt">${pIn} probable</span>` : ''}</h3>${groupedIn(id, oneDate)}`;
-    if (n.isTarget && !ins.length) html += `<p class="muted">No endorsements recorded for this candidate.</p>`;
+    for (const [h, es, side] of links) if (es.length) {
+      use(es); const sr = sharedRef(es);
+      html += `<details class="grp" open><summary><span>${h}</span> <span class="cnt">${es.length}</span> <span class="small muted nt">slate link, not an endorsement</span></summary>${sr ? bannerSrc(sr) : ''}<ul class="klist">${es.map((e) => { const o = N(side === 's' ? e.s : e.t); return `<li>${typeGlyph(o.type)}<span class="kr">${nlink(o)}${sr ? '' : marker(refNums(e))}</span></li>`; }).join('')}</ul></details>`;
+    }
+    // 2. the network analysis, last and in plain words
+    html += placement(n);
+    // 3. references used in this panel
+    html += refList(used);
     return html;
   }
 
   function coalitionsPanel() {
     const items = d.communities.map((c) => {
       const pairs: string[] = [];
-      for (let i = 0; i < c.targets.length; i++) for (let j = i + 1; j < c.targets.length; j++) pairs.push(`<li>${esc(shortName(N(c.targets[i])))} & ${esc(shortName(N(c.targets[j])))}: <strong>${pairPct(ix.together(c.targets[i], c.targets[j]), togetherConf(c.targets[i], c.targets[j]), T)}</strong></li>`);
+      for (let i = 0; i < c.targets.length; i++) for (let j = i + 1; j < c.targets.length; j++) pairs.push(`<li>${esc(shortName(N(c.targets[i])))} & ${esc(shortName(N(c.targets[j])))}: <strong>${pctCut(ix.together(c.targets[i], c.targets[j]), T)}</strong></li>`);
       return `<li class="coal"><div class="coal-h">${chip(c.id)}<strong>${esc(blocName(ix, c))}</strong></div>
         <p class="coal-c">${c.targets.map((t) => `${nlink(N(t))} <span class="race-tag">${esc(raceShort(N(t).race))}</span>`).join(', ')}</p>
         <p class="small">Weakest pair ${esc(shortName(N(c.weakest.a)))} & ${esc(shortName(N(c.weakest.b)))}: <strong>${weakPct(d, c)}</strong>, ${marginLabel(d, c)}${intactWords(c, true) ? `. Intact in ${intactWords(c, true)}${(() => { const nt = intactNote(d, ix, c); return nt ? ` (${esc(nt)})` : ''; })()}` : ''}</p>
         ${pairs.length > 1 ? `<details class="pairs"><summary>All ${pairs.length} pairs</summary><ul>${pairs.join('')}</ul></details>` : ''}
         ${Object.keys(c.typeCounts).length ? typeBar(c.typeCounts) : ''}</li>`;
     }).join('');
-    const loose = d.loose.map((l) => `<li>${nlink(N(l.id), undefined, 'strong')} <span class="race-tag">${esc(raceShort(N(l.id).race))}</span><br><span class="small">${(() => { const nm = nearMisses(d).find((x) => x.l.id === l.id); return nm ? `Just short of ${LETTERS[nm.c]}: ${pctCut(nm.v, T)}` : `Closest: ${listJoin(closest(l.id).slice(0, 2).map((p) => `${esc(shortName(N(p.t)))} (${pairPct(p.p, p.pConf, T)})`))}`; })()}</span></li>`).join('');
+    const loose = d.loose.map((l) => `<li>${nlink(N(l.id), undefined, 'strong')} <span class="race-tag">${esc(raceShort(N(l.id).race))}</span><br><span class="small">${(() => { const nm = nearMisses(d).find((x) => x.l.id === l.id); return nm ? `Just short of ${LETTERS[nm.c]}: ${pctCut(nm.v, T)}` : `Most similarly endorsed: ${listJoin(closest(l.id, 2).map((p) => `${esc(shortName(N(p.t)))} (${pct(p.p)})`))}`; })()}</span></li>`).join('');
     const allTypes = [...new Set(d.communities.flatMap((c) => Object.keys(c.typeCounts)))];
     return `<h2 class="ph">${numWord(S.nBlocs).replace(/^./, (x) => x.toUpperCase())} ${plural(S.nBlocs, 'coalition')}</h2>
-      <p class="pintro">Every pair lands together in at least ${pct(T)} of ${S.nRuns.toLocaleString('en-US')} runs. Bars: endorsers by type.</p>
+      <p class="pintro">Every pair is grouped together in at least ${pct(T)} of ${S.nRuns.toLocaleString('en-US')} clustering runs. Bars: endorsers by type.</p>
       <ol class="coals">${items}</ol>${typeKey(allTypes)}
-      <h3>No coalition <span class="cnt">${d.loose.length + isolated.length}</span></h3><p class="small muted">Ranges: with/without probable.</p><ul class="loose">${loose}${isolated.map((n) => `<li>${nlink(n, undefined, 'strong')} <span class="race-tag">${esc(raceShort(n.race))}</span><br><span class="small">No endorsements recorded</span></li>`).join('')}</ul>`;
-  }
-
-  function stackBar(b: Bridge) {
-    const m = new Map<string, number>();
-    for (const t of b.targets) { const k = campOf(N(t)); m.set(k, (m.get(k) || 0) + 1); }
-    const segs = [...m.entries()].sort((a, c) => a[0].localeCompare(c[0])).map(([k, v]) => {
-      const c = k.startsWith('b') ? +k.slice(1) : -1;
-      return `<span class="seg${c < 0 ? ' none' : ''}" style="flex:${v};${c >= 0 ? `background:${commColor(c)}` : ''}" title="${esc(c >= 0 ? commName(ix, d, c) : shortName(N(k.slice(1))))}: ${v}"></span>`;
-    }).join('');
-    return `<div class="sbar" role="img" aria-label="${b.reach} coalitions, ${b.deg} picks">${segs}</div>`;
-  }
-  function bridgesPanel() {
-    const mode = state.bmode;
-    let rows = '';
-    if (mode === 'cand') {
-      const max = Math.max(...candList.map((c) => c.bc), 1e-9);
-      rows = candList.slice(0, 15).map((c) => `<li><div class="br-h"><span class="rank">${c.rank}</span>${nlink(N(c.id), undefined, 'strong')}<span class="race-tag">${esc(raceShort(N(c.id).race))}</span></div><div class="br-bar"><span style="width:${(100 * c.bc) / max}%"></span></div></li>`).join('');
-    } else {
-      const list = (mode === 'bc' ? bcList : reachList).slice(0, 15);
-      const rk = (b: Bridge) => (mode === 'bc' ? b.rankBc! : b.rankReach);
-      const sure = (b: Bridge) => (mode === 'bc' ? b.robustBc : b.robustReach);
-      const max = Math.max(...list.map((b) => b.bc), 1e-9);
-      const row = (b: Bridge) => {
-        const tie = list.filter((x) => rk(x) === rk(b)).length > 1;
-        return `<li class="${sure(b) ? '' : 'unsure-row'}"><div class="br-h"><span class="rank">${tie ? '=' : ''}${rk(b)}</span>${nlink(N(b.id), undefined, 'strong')}<span class="small muted">${esc(N(b.id).type)}</span>${sure(b) ? '' : '<span class="unsure">less certain</span>'}</div>
-          ${mode === 'reach' ? `${stackBar(b)}<p class="br-meta">${b.reach} of ${nCamps(d)} coalitions · ${b.deg} picks · top ${K} in ${pct(b.topReach)} of re-runs</p>` : `<div class="br-bar"><span style="width:${(100 * b.bc) / max}%"></span></div><p class="br-meta">top ${K} in ${pct(b.topBc)} of resamples${b.bcLooWorst ? ` · worst rank after removing one endorsement: #${b.bcLooWorst}` : ''}${b.rankBcConf != null && b.rankBcConf !== b.rankBc ? ` · #${b.rankBcConf} excluding probable endorsements` : ''}</p>`}
-          <p class="sentence small">${bridgeSentence(ix, d, b.id)}</p></li>`;
-      };
-      const ok = list.filter(sure), un = list.filter((b) => !sure(b));
-      rows = `${ok.length ? `<li class="sub">Hold up under resampling <span class="cnt">${ok.length}</span></li>${ok.map(row).join('')}` : ''}${un.length ? `<li class="sub">Less certain <span class="cnt">${un.length}</span></li>${un.map(row).join('')}` : ''}`;
-    }
-    const expl = mode === 'cand' ? '<p class="small">Candidates score high because all their endorsers connect through them.</p>'
-      : mode === 'reach' ? `<p class="small">How many of the ${numWord(nCamps(d))} coalitions an endorser’s picks land in. Ties share a rank. Bars: picks by coalition; white = no coalition.</p>`
-        : '<p class="small">How often an endorser lies on the shortest chain of endorsements between two others.</p>';
-    return `<h2 class="ph">Who spans the coalitions</h2>
-      <p class="pintro">Holds up: stays in the top ${K} when endorsements are dropped at random, one at a time, or the probable ones are left out.</p>
-      <div class="seg" role="group" aria-label="Ranking"><button data-bsort="reach" aria-pressed="${mode === 'reach'}">Coalitions reached</button><button data-bsort="bc" aria-pressed="${mode === 'bc'}">Betweenness</button><button data-bsort="cand" aria-pressed="${mode === 'cand'}">Candidates</button></div>
-      ${expl}<ol class="bridges">${rows}</ol>`;
+      <h3>No coalition <span class="cnt">${d.loose.length + isolated.length}</span></h3><ul class="loose">${loose}${isolated.map((n) => `<li>${nlink(n, undefined, 'strong')} <span class="race-tag">${esc(raceShort(n.race))}</span><br><span class="small">No endorsements recorded</span></li>`).join('')}</ul>`;
   }
 
   function racePanel() {
@@ -617,7 +564,7 @@ async function main() {
   }
 
   function renderPanel() {
-    panel.innerHTML = state.selected ? nodePanel(state.selected) : state.view === 'coalitions' ? coalitionsPanel() : state.view === 'bridges' ? bridgesPanel() : racePanel();
+    panel.innerHTML = state.selected ? nodePanel(state.selected) : state.view === 'coalitions' ? coalitionsPanel() : racePanel();
     panel.scrollTop = 0;
     updatePill();
   }
@@ -626,15 +573,14 @@ async function main() {
     const items = state.colorBy === 'community'
       ? d.communities.map((c) => `<li>${chip(c.id)}<span>${esc(blocName(ix, c))}</span></li>`).join('') + `<li><span class="dot none"></span><span>No coalition</span></li>`
       : TYPE_ORDER.filter((t) => d.nodes.some((n) => n.type === t)).map((t) => `<li><span class="dot" style="background:${TYPE_RAMP[t]}"></span><span>${esc(t)}</span></li>`).join('');
-    const ring = state.view === 'race' ? 'endorser shared within the race' : state.view === 'bridges' ? `top ${narrowMQ.matches ? 5 : K} (number = rank)` : 'spans the most coalitions';
     L.innerHTML = `<ul>${items}<li><span class="dot" style="background:${LEAF}"></span><span>backs one candidate</span></li></ul>
-      <p><span class="lline"></span>endorsement <span class="lline dark"></span>crosses coalitions <span class="lline prob"></span>probable${memberEdges.length ? ' <span class="lline mem"></span>slate link' : ''} <span class="ringk"></span>${ring}</p>${narrowMQ.matches && TOPB.size && state.view !== 'race' ? `<ol class="lbr">${[...TOPB].map((id) => ({ id, k: ringNum(id) })).sort((a, b) => (a.k ?? 99) - (b.k ?? 99)).map((x) => `<li><span class="ringn">${x.k}</span> <a href="?node=${encodeURIComponent(x.id)}" data-node="${esc(x.id)}">${esc(N(x.id).name)}</a></li>`).join('')}</ol>` : ''}`;
+      <p><span class="lline"></span>endorsement${memberEdges.length ? ' <span class="lline mem"></span>slate link' : ''}${state.view === 'race' ? ' <span class="ringk"></span>endorser shared within the race' : ''} <span class="selk"></span>selected</p>`;
   }
   // ---------- bottom sheet (narrow screens) ----------
   const sheet = $('#sheet'); const handle = $<HTMLButtonElement>('#sheetbtn');
   function setSheet(open: boolean) {
     sheet.classList.toggle('open', open); document.body.classList.toggle('sheet-open', open); handle.setAttribute('aria-expanded', String(open));
-    handle.querySelector('span')!.textContent = open ? 'Hide details' : state.selected ? `Details: ${N(state.selected).name}` : 'Coalitions, bridges and races';
+    handle.querySelector('span')!.textContent = open ? 'Hide details' : state.selected ? `Details: ${N(state.selected).name}` : 'Coalitions and races';
   }
   handle.addEventListener('click', () => setSheet(!sheet.classList.contains('open')));
   function updatePill() { if (stackMQ.matches) setSheet(sheet.classList.contains('open') || !!state.selected); }
@@ -670,7 +616,8 @@ async function main() {
     }
     if (t.closest('[data-back]')) { select(null); return; }
     const rb = t.closest<HTMLElement>('[data-race]'); if (rb) { state.race = rb.dataset.race!; recompute(); refresh({ skipIndexation: true }); renderPanel(); syncHash(); return; }
-    const bs = t.closest<HTMLElement>('[data-bsort]'); if (bs) { state.bmode = bs.dataset.bsort as BMode; recompute(); refresh({ skipIndexation: true }); renderPanel(); renderLegend(); syncHash(); return; }
+    const rf = t.closest<HTMLElement>('[data-ref]');
+    if (rf) { ev.preventDefault(); const li = panel.querySelector<HTMLElement>(`#pref-${rf.dataset.ref}`); if (li) { (li.closest('details') as HTMLDetailsElement | null)?.setAttribute('open', ''); li.scrollIntoView({ block: 'center' }); li.classList.add('flash'); setTimeout(() => li.classList.remove('flash'), 1200); } return; }
     const sm = t.closest<HTMLButtonElement>('.showmore');
     if (sm) { sm.previousElementSibling?.querySelectorAll('li.more').forEach((li) => ((li as HTMLElement).hidden = false)); sm.remove(); }
   });
@@ -702,7 +649,7 @@ async function main() {
   const searchIdx = d.nodes.map((n) => ({ id: n.id, key: norm([n.name, ...n.variants].join(' | ')) }));
   let hits: string[] = []; let hi = 0;
   function renderHits() {
-    qres.innerHTML = hits.map((id, i) => { const n = N(id); return `<li role="option" id="opt-${i}" aria-selected="${i === hi}" data-hit="${esc(id)}">${typeGlyph(n.type)}<span>${esc(n.name)}</span><small>${esc(n.type)}${n.race ? ' · ' + esc(n.race) : ''}</small></li>`; }).join('')
+    qres.innerHTML = hits.map((id, i) => { const n = N(id); return `<li role="option" id="opt-${i}" aria-selected="${i === hi}" data-hit="${esc(id)}">${n.isTarget ? avatar(n, 'sm') : typeGlyph(n.type)}<span>${esc(n.name)}</span><small>${esc(n.type)}${n.race ? ' · ' + esc(n.race) : ''}</small></li>`; }).join('')
       || (q.value.trim() ? '<li class="none" role="option" aria-disabled="true" aria-selected="false">No match</li>' : '');
     const open = !!q.value.trim();
     qres.hidden = !open; q.setAttribute('aria-expanded', String(open));
@@ -731,7 +678,6 @@ async function main() {
     const p = new URLSearchParams();
     if (state.view !== 'coalitions') p.set('view', state.view);
     if (state.view === 'race' && state.race !== 'Rent Board') p.set('race', state.race);
-    if (state.view === 'bridges' && state.bmode !== 'reach') p.set('rank', state.bmode);
     if (state.selected) p.set('node', state.selected);
     const h = p.toString(); const want = location.pathname + (h ? '?' + h : '');
     if (location.pathname + location.search + location.hash !== want) history.replaceState(null, '', want);
@@ -739,10 +685,9 @@ async function main() {
   function applyHash() {
     applying = true;
     const hp = new URLSearchParams(location.search.slice(1) || location.hash.slice(1));
-    const v = hp.get('view'); const race = hp.get('race'); const rank = hp.get('rank');
+    const v = hp.get('view'); const race = hp.get('race');
     if (race && d.races.some((r) => r.race === race)) state.race = race;
-    if (rank && ['reach', 'bc', 'cand'].includes(rank)) state.bmode = rank as BMode;
-    setView(v === 'bridges' || v === 'race' ? (v as View) : 'coalitions');
+    setView(v === 'race' ? 'race' : 'coalitions');   // old ?view=bridges links open the coalitions view
     const node = hp.get('node');
     if (node && byId.has(node)) select(node, true);
     applying = false;

@@ -1,6 +1,6 @@
 """Static, annotated overview of the core network, generated from graph.json (no hand placement).
 Writes src/generated/overview-wide.svg and overview-narrow.svg. Labels are placed greedily with
-collision tests; bloc hulls, bloc letters and the top robust bridges are marked."""
+collision tests; bloc hulls and bloc letters are marked."""
 import json, math, os, sys
 from html import escape
 
@@ -77,13 +77,7 @@ def render(d, W, fs, narrow):
             if e['kind'] == 'member':
                 el.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="#444" stroke-width="1" stroke-dasharray="3 2" stroke-opacity=".7"/>')
             else:
-                cs, ct = N[e['s']]['community'], N[e['t']]['community']
-                cross = cs != ct
-                prob = 'probable' in (e.get('conf') or '').lower()
-                if prob:   # same as the interactive graph: solid blue, heavier
-                    pl.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="#1f6fd1" stroke-opacity=".95" stroke-width="{2.6 if narrow else 2}"/>')
-                    continue
-                el.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="{"#3d3d3d" if cross else "#8c8c8c"}" stroke-opacity="{.32 if cross else .3}" stroke-width="{.9 if narrow else .8}"/>')
+                el.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="#6e6e6e" stroke-opacity=".3" stroke-width="{.9 if narrow else .8}"/>')
     out.insert(0, '<g>' + ''.join(el) + ''.join(pl) + '</g>')
     # nodes
     occupied = list(occupied_pre)   # rects (x0,y0,x1,y1)
@@ -94,17 +88,7 @@ def render(d, W, fs, narrow):
         else: nl.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" fill="#fff" stroke="#555" stroke-width="{1.1 if narrow else .9}"/>')
         if n['isTarget']: occupied.append((x - r, y - r, x + r, y + r))
     out.append('<g>' + ''.join(nl) + '</g>')
-    # bridges: top robust by reach rank
-    br = [b for b in d['bridges'] if b.get('robustReach')]
-    br.sort(key=lambda b: (b['rankReach'], -b['deg'], b['id']))   # same order as text.ts robustBridges()
-    top = br[:10]
-    marks = []
-    for i, b in enumerate(top):
-        x, y = P[b['id']]; r = rad(N[b['id']]) + fs * 0.35
-        marks.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" fill="none" stroke="#111" stroke-width="{2 if narrow else 1.6}"/>')
-        occupied.append((x - r, y - r, x + r, y + r))
-    out.append(''.join(marks))
-    # labels: bridges first (guaranteed), then candidates by in-degree; skip slate members (the slate is labelled)
+    # labels: every candidate, by in-degree
     def place(lbl, x, y, r, fsz, bold, force):
         w = text_w(lbl, fsz, bold); h = fsz * 1.05
         cands = [(x + r + 3, y + h * 0.35, 'start'), (x - r - 3, y + h * 0.35, 'end'), (x, y - r - 4, 'middle'), (x, y + r + h * 0.95, 'middle')]
@@ -134,11 +118,6 @@ def render(d, W, fs, narrow):
             occupied.append(best[4]); lead(best[1], best[2], best[4]); return best[1], best[2], best[3]
         return None
     labels = []; leaders = []
-    for i, b in enumerate(top):
-        n = N[b['id']]; x, y = P[b['id']]
-        lbl = f'{i + 1}' if narrow else f'{i + 1} {n["name"]}'
-        p = place(lbl, x, y, rad(n) + fs * 0.35, fs, True, True)
-        labels.append((p, lbl, True))
     tg = sorted([n for n in core if n['isTarget']], key=lambda n: (bool(n.get('analysisEndorser')), bool(n.get('memberOf')), -n['inDeg']))
     for n in tg:   # every candidate is labelled (forced placement); a withdrawn one is marked as such
         x, y = P[n['id']]

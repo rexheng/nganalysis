@@ -2,7 +2,7 @@ import { defineConfig, type Plugin } from 'vite';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { buildTexts, esc } from './src/text';
-import { methodsHtml, methodsMarkdown } from './src/methods';
+import { methodsHtml, methodsMarkdown, referencesHtml } from './src/methods';
 import type { Data } from './src/types';
 
 const load = (): Data => JSON.parse(readFileSync(new URL('./public/data/graph.json', import.meta.url), 'utf-8'));
@@ -26,7 +26,8 @@ function bakeText(): Plugin {
         .replace('<!--OVERVIEW_KEY-->', t.overviewKey).replace('<!--OVERVIEW_ALT-->', esc(t.overviewAlt))
         .replace('<!--GRAPH_SUMMARY-->', esc(t.graphSummary))
         .replace('<!--SEEDS-->', d.summary.nRuns.toLocaleString('en-US'))
-        .replace('<!--METHODS-->', toGraphLinks(methodsHtml(d)));
+        .replace('<!--METHODS-->', toGraphLinks(methodsHtml(d)))
+        .replace('<!--REFERENCES-->', referencesHtml(d));
     },
     generateBundle() {
       this.emitFile({ type: 'asset', fileName: 'data/METHODS.md', source: methodsMarkdown(load()) });
