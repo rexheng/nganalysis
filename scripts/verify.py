@@ -26,11 +26,15 @@ for f in [x for x, _ in g['summary'].get('downloads', [])] + ['METHODS.md', 'gra
     elif f.endswith('.zip'): t = ''
     else: t = body.decode('utf-8', 'replace')
     leaks[f] = [m.group(0) for m in LEAK.finditer(t)][:3]
-BANNED = re.compile(r'probable|betweenness|lands most|crosses? coalitions|spans? (the most )?coalitions|bridges? view', re.I)
+BANNED = re.compile(r'probable|betweenness|lands most|\bcoalitions\b|(in|no|any|a|same) coalition\b|\bcoalition [A-G]\b|coalition (view|legend|colou?r)|\bbridg\w*|\bbloc\b|\bgroup [A-G]\b|\bcommunit(y|ies)\b', re.I)
 banned = {}
 for page in ('/', '/findings/'):
     t = urllib.request.urlopen(URL + page).read().decode(); leaks[page] = [m.group(0) for m in LEAK.finditer(t)][:3]; banned[page] = [m.group(0) for m in BANNED.finditer(t)][:3]
 banned['METHODS.md'] = [m.group(0) for m in BANNED.finditer(urllib.request.urlopen(URL + '/data/METHODS.md').read().decode())][:3]
+_gj = json.loads(urllib.request.urlopen(URL + '/data/graph.json').read())
+banned['graph.json coalition keys'] = [k for k in ('communities', 'loose', 'ties', 'variants', 'borderlinePairs') if k in _gj] + sorted({k for n in _gj['nodes'] for k in ('community', 'blocScore', 'loose') if k in n}) + [k for k in ('nBlocs', 'robustThreshold', 'palette', 'bootstrap') if k in _gj['summary']]
+for js in sorted(set(re.findall(r'/assets/[\w.-]+\.js', urllib.request.urlopen(URL + '/').read().decode() + urllib.request.urlopen(URL + '/findings/').read().decode()))):
+    banned[js] = [m.group(0) for m in re.finditer(r'coalitions|In no coalition|probable|betweenness', urllib.request.urlopen(URL + js).read().decode(), re.I)][:3]
 for path in ('/internal/', '/raw/rex_doc.md', '/raw/rex_doc.docx', '/data/internal/'):
     try: body = urllib.request.urlopen(URL + path).read().decode('utf-8', 'replace'); code = 'app fallback (not the file)' if 'id="graph"' in body else 'EXPOSED'
     except Exception as ex: code = getattr(ex, 'code', 'err')
@@ -41,7 +45,7 @@ PANEL = """(()=>{const P=document.getElementById('panel');const refs=[...P.query
   return {h2: (P.querySelector('h2')||{}).textContent, banner: [...P.querySelectorAll('.banner')].map(b=>b.innerText), groups: [...P.querySelectorAll('.grp>summary')].map(s=>s.innerText.replace(/\\s+/g,' ').trim()),
    markers: refs.length, unresolved_markers: refs.filter(a=>!P.querySelector('#pref-'+a.dataset.ref)).map(a=>a.dataset.ref), ref_items: P.querySelectorAll('.reflist li').length,
    ref_items_missing_date_or_url: [...P.querySelectorAll('.reflist li')].filter(li=>!li.querySelector('a.ru[href^=http]')||!/Accessed|not recorded/.test(li.innerText)).length,
-   place: (P.querySelector('.place')||{}).innerText, banned: (P.innerText.match(/probable|betweenness|lands most|crosses? coalitions|spans? coalitions/ig)||[]),
+   place: (P.querySelector('.place')||{}).innerText, banned: (P.innerText.match(/probable|betweenness|lands most|coalitions|(in|no|any) coalition\\b|coalition [A-G]\\b|bridg\\w*|\\bgroup [A-G]\\b/ig)||[]),
    small_text_px: Math.min(...[...P.querySelectorAll('*')].filter(e=>e.childNodes.length&&[...e.childNodes].some(n=>n.nodeType===3&&n.textContent.trim())).map(e=>parseFloat(getComputedStyle(e).fontSize)))}})()"""
 def shoot_panel(pg, mob, path):
     if mob: pg.screenshot(path=path)   # the bottom sheet fills the screen on phones
@@ -67,13 +71,13 @@ with sync_playwright() as p:
           sigma_before_interaction: window.__test.sigma(), preview_canvas: !!document.querySelector('#graph .preview'),
           words_outside_panel: (()=>{const cl=document.body.cloneNode(true); cl.querySelectorAll('#sheet,#legendbox,.sr,script,noscript,#tooltip,#qres').forEach(e=>e.remove()); return cl.innerText.split(/\\s+/).filter(Boolean).length})()}})()""")
         pg.screenshot(path=f'{OUT}/{name}-landing.png')
-        for view in ['coalitions', 'race']:
+        for view in ['cands', 'race']:
             if mob and not pg.evaluate("document.getElementById('sheet').classList.contains('open')"): pg.locator('#sheetbtn').tap()
             pg.click(f'[data-view={view}]'); pg.wait_for_timeout(500)
             pg.screenshot(path=f'{OUT}/{name}-{view}.png')
         c['default_race'] = pg.evaluate("document.querySelector('[data-race][aria-pressed=true]').dataset.race")
         c['bridges_tab_present'] = pg.locator('[data-view=bridges]').count() > 0
-        pg.click('[data-view=coalitions]'); pg.wait_for_timeout(300)
+        pg.click('[data-view=cands]'); pg.wait_for_timeout(300)
         if mob: pg.locator('#sheetbtn').tap(); pg.wait_for_timeout(400)
         c['sheet_closed_before_click'] = (not pg.evaluate("document.getElementById('sheet').classList.contains('open')")) if mob else None
         c['unlabelled_candidates'] = pg.evaluate("(()=>{const L=new Set(window.__labels||[]);return window.__test.cands().filter(id=>!L.has(id))})()")
@@ -107,7 +111,7 @@ with sync_playwright() as p:
         if mob and pg.evaluate("document.getElementById('sheet').classList.contains('open')"): pg.locator('#sheetbtn').tap(); pg.wait_for_timeout(300)
         if not pg.evaluate("document.getElementById('legendbox').open"): pg.click('#legendbox summary'); pg.wait_for_timeout(200)
         pg.check('#showall'); pg.wait_for_timeout(400); pg.screenshot(path=f'{OUT}/{name}-showall.png'); pg.uncheck('#showall')
-        pg.select_option('#colorby', 'type'); pg.wait_for_timeout(400); pg.screenshot(path=f'{OUT}/{name}-colorby-type.png'); pg.select_option('#colorby', 'community')
+        c['legend_text'] = pg.locator('#legend').inner_text()
         if mob: pg.click('#legendbox summary'); pg.wait_for_timeout(200)
         if True:   # axe at every width
             pg.add_script_tag(path='/tmp/axe-pkg/node_modules/axe-core/axe.min.js'); c['axe_landing'] = pg.evaluate(AXE)
@@ -117,6 +121,9 @@ with sync_playwright() as p:
         c['deeplink_legacy_bridges_view'] = [pg.evaluate('window.__test.state.view'), pg.locator('#panel h2').first.inner_text()]
         pg.goto(URL + '/?view=race'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(400)
         c['deeplink_race_view'] = pg.evaluate('window.__test.state.view')
+        pg.goto(URL + '/?view=coalitions'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(400)
+        c['deeplink_legacy_coalitions_view'] = [pg.evaluate('window.__test.state.view'), pg.locator('#panel h2').first.inner_text()]
+        c['search_placeholder'] = pg.get_attribute('#q', 'placeholder')
         gid = pg.evaluate("window.__test.byName('Green Party of Alameda County')")
         pg.goto(URL + f'/?node={gid}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(800)
         c['green_panel'] = pg.evaluate(PANEL); shoot_panel(pg, mob, f'{OUT}/{name}-panel-green.png')
@@ -148,6 +155,47 @@ with sync_playwright() as p:
         pg.goto(URL + f'/?node={aid}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(2500)
         fr['logos'] = pg.evaluate("(()=>{const im=[...document.querySelectorAll('#panel .av-logo img')];return {imgs: im.length, loaded: im.filter(i=>i.complete&&i.naturalWidth>0).length, fallbacks: document.querySelectorAll('#panel .av-logo:not(:has(img))').length}})()")
         c['landing_tools_fit'] = pg.evaluate("(()=>{const r=document.querySelector('.ab-tools').getBoundingClientRect();return {w:Math.round(r.width),h:Math.round(r.height),hscroll:document.documentElement.scrollWidth>innerWidth}})()")
+        # ---------- compare (multi-select) ----------
+        cm = c['compare'] = {}
+        mid = pg.evaluate("window.__test.byName('Syrak Micael')"); bid = pg.evaluate("window.__test.byName('Ben Bartlett')")
+        CMP = """(()=>{const P=document.getElementById('panel');return {multi: window.__test.multi(), all_linked: window.__test.allLinked().length, some_linked: window.__test.someLinked().length,
+          chips: P.querySelectorAll('.cchip').length, banner: (P.querySelector('.banner')||{}).innerText, between: (P.querySelector('.between')||{}).innerText,
+          only: [...P.querySelectorAll('.grp.only>summary')].map(s=>s.innerText.replace(/\\s+/g,' ').trim()), markers: P.querySelectorAll('a[data-ref]').length,
+          unresolved_markers: [...P.querySelectorAll('a[data-ref]')].filter(a=>!P.querySelector('#pref-'+a.dataset.ref)).length, url: location.search}})()"""
+        pg.goto(URL + f'/?select={mid},{bid}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(900)
+        cm['deeplink'] = pg.evaluate(CMP)
+        pg.screenshot(path=f'{OUT}/{name}-compare-micael-bartlett.png'); shoot_panel(pg, mob, f'{OUT}/{name}-compare-panel.png')
+        if name in ('d1440', 'm390'): cm['panel_text'] = pg.locator('#panel').inner_text()
+        pg.add_script_tag(path='/tmp/axe-pkg/node_modules/axe-core/axe.min.js'); cm['axe'] = pg.evaluate(AXE)
+        # + Compare in the panel, then "+ Add" in search, by keyboard
+        pg.goto(URL + f'/?node={mid}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(700)
+        btn = pg.locator('#panel [data-compare]'); btn.tap() if mob else btn.click(); pg.wait_for_timeout(400)
+        cm['after_compare_button'] = pg.evaluate(CMP)
+        if mob and pg.evaluate("document.getElementById('sheet').classList.contains('open')"): pg.locator('#sheetbtn').tap(); pg.wait_for_timeout(300)
+        pg.fill('#q', 'Bartlett'); pg.wait_for_timeout(300)
+        cm['search_add_option'] = pg.locator('#qres [data-add]').count()
+        pg.keyboard.press('ArrowDown'); pg.keyboard.press('Enter'); pg.wait_for_timeout(600)
+        cm['after_search_add'] = pg.evaluate(CMP)
+        pg.add_script_tag(path='/tmp/axe-pkg/node_modules/axe-core/axe.min.js'); cm['axe_after_add'] = pg.evaluate(AXE)
+        if not mob:   # shift-click on the graph
+            pg.goto(URL + f'/?node={mid}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(900)
+            pos = pg.evaluate(f"window.__test.pos('{bid}')"); box = pg.locator('#graph').bounding_box()
+            pg.mouse.move(box['x'] + pos['x'], box['y'] + pos['y']); pg.wait_for_timeout(200)
+            pg.keyboard.down('Shift'); pg.mouse.click(box['x'] + pos['x'], box['y'] + pos['y']); pg.keyboard.up('Shift'); pg.wait_for_timeout(700)
+            cm['shift_click'] = pg.evaluate('window.__test.multi()')
+            pg.goto(URL + f'/?select={mid},{bid}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(700)
+        # remove a chip, then clear
+        x = pg.locator(f'#panel [data-unsel="{bid}"]')
+        if mob and not pg.evaluate("document.getElementById('sheet').classList.contains('open')"): pg.locator('#sheetbtn').tap(); pg.wait_for_timeout(300)
+        x.tap() if mob else x.click(); pg.wait_for_timeout(400); cm['after_remove'] = pg.evaluate('window.__test.multi()')
+        cl = pg.locator('#panel [data-clear]'); cl.tap() if mob else cl.click(); pg.wait_for_timeout(400)
+        cm['after_clear'] = [pg.evaluate('window.__test.multi()'), pg.evaluate('location.search'), pg.locator('#panel h2').first.inner_text()]
+        # with a filter, and the cap of five
+        pg.goto(URL + f'/?hide=individuals&select={mid},{bid}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(700)
+        cm['with_filter'] = pg.evaluate(CMP)
+        six = pg.evaluate("window.__test.cands().slice(0,6).join(',')")
+        pg.goto(URL + f'/?select={six}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(700)
+        cm['cap'] = len(pg.evaluate('window.__test.multi()'))
         # ---------- findings page ----------
         pg.goto(URL + '/findings/', wait_until='networkidle'); pg.wait_for_timeout(800)
         f = c['findings'] = pg.evaluate("""(()=>({draft: (document.querySelector('.draft')||{}).textContent, back_links: [...document.querySelectorAll('a[href="/"]')].length,

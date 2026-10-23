@@ -1,6 +1,6 @@
 """Static, annotated overview of the core network, generated from graph.json (no hand placement).
 Writes src/generated/overview-wide.svg and overview-narrow.svg. Labels are placed greedily with
-collision tests; bloc hulls and bloc letters are marked."""
+collision tests. Candidates are coloured by race, endorsers by type (src/palette.json)."""
 import json, math, os, sys
 from html import escape
 
@@ -34,8 +34,11 @@ def short_name(n):
 
 def render(d, W, fs, narrow):
     N = {n['id']: n for n in d['nodes']}
-    pal = d['summary']['palette']['colors']
-    col = lambda c: pal[c] if c is not None and 0 <= c < len(pal) else None
+    PAL = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src', 'palette.json'), encoding='utf-8'))
+    grp = {t: g for g, ts in PAL['groupTypes'].items() for t in ts}
+    def col(n):
+        if n['isTarget']: return PAL['race'].get(n.get('race') or '', PAL['other'])
+        return PAL['group'].get(grp.get(n['type'], ''), PAL['other'])
     core = [n for n in d['nodes'] if not n['leaf'] and (n['inDeg'] + n['outDeg']) > 0]
     if narrow:   # portrait: rotate the layout a quarter turn
         for n in core: n['_x'], n['_y'] = n['y'], -n['x']
@@ -50,25 +53,7 @@ def render(d, W, fs, narrow):
         if n['isTarget']: return (3.5 + 1.6 * math.log2(1 + n['inDeg'])) * (W / 1000) * (1.5 if narrow else 1)
         return (1.6 + 0.9 * math.sqrt(n['outDeg'])) * (W / 1000) * (1.4 if narrow else 1)
     out = []
-    # bloc hulls
-    letters = 'ABCDEFGHIJ'
-    hull_tops = {}
     occupied_pre = []
-    for c in d['communities']:
-        pts = []
-        R = fs * 1.6
-        for t in c['targets']:
-            if t not in P: continue
-            x, y = P[t]
-            for k in range(16):
-                a = 2 * math.pi * k / 16; pts.append((round(x + R * math.cos(a), 1), round(y + R * math.sin(a), 1)))
-        if not pts: continue
-        hp = hull(pts)
-        color = col(c['id'])
-        out.append(f'<path d="M{" L".join(f"{x},{y}" for x, y in hp)} Z" fill="{color}" fill-opacity=".09" stroke="{color}" stroke-opacity=".7" stroke-width="{1.4 if not narrow else 2}" stroke-linejoin="round"/>')
-        top = min(hp, key=lambda p: (p[1], p[0]))
-        hull_tops[c['id']] = top
-        occupied_pre.append((top[0] - fs * 0.7, top[1] - fs * 0.7 - 2, top[0] + fs * 0.7, top[1] + fs * 0.7 - 2))
     # edges (core endorsement edges + membership)
     el = []; pl = []
     for e in d['edges']:
@@ -83,9 +68,8 @@ def render(d, W, fs, narrow):
     occupied = list(occupied_pre)   # rects (x0,y0,x1,y1)
     nl = []
     for n in sorted(core, key=lambda n: (n['isTarget'], n['inDeg'])):
-        x, y = P[n['id']]; r = rad(n); c = col(n['community'])
-        if c: nl.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" fill="{c}" stroke="#fff" stroke-width=".6"/>')
-        else: nl.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" fill="#fff" stroke="#555" stroke-width="{1.1 if narrow else .9}"/>')
+        x, y = P[n['id']]; r = rad(n); c = col(n)
+        nl.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" fill="{c}" stroke="{"#111" if n["isTarget"] else "#fff"}" stroke-width="{1.2 if n["isTarget"] else .6}"/>')
         if n['isTarget']: occupied.append((x - r, y - r, x + r, y + r))
     out.append('<g>' + ''.join(nl) + '</g>')
     # labels: every candidate, by in-degree
@@ -129,10 +113,6 @@ def render(d, W, fs, narrow):
         if not p: continue
         tx, ty, anc = p
         tl.append(f'<text x="{tx:.1f}" y="{ty:.1f}" text-anchor="{anc}" font-size="{fs:.1f}" font-weight="{700 if bold else 500}" paint-order="stroke" stroke="#fff" stroke-width="{fs * 0.22:.1f}" stroke-linejoin="round" fill="#111">{escape(lbl)}</text>')
-    # bloc letters at hull tops
-    for cid, (x, y) in hull_tops.items():
-        c = col(cid); r = fs * 0.72
-        tl.append(f'<circle cx="{x:.1f}" cy="{y - 2:.1f}" r="{r:.1f}" fill="{c}" stroke="#fff" stroke-width="1.5"/><text x="{x:.1f}" y="{y - 2 + fs * 0.35:.1f}" text-anchor="middle" font-size="{fs:.1f}" font-weight="800" fill="{on_color(c)}">{letters[cid]}</text>')
     out.append('<g font-family="var(--sans)">' + ''.join(tl) + '</g>')
     return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="100%" aria-hidden="true" focusable="false">' + ''.join(out) + '</svg>'
 

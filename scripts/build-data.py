@@ -751,7 +751,7 @@ summary['variantPartitions'] = {k_: v_ for k_, v_ in summary['variantPartitions'
 summary['refusedMerges'] = {k_: v_ for k_, v_ in summary['refusedMerges'].items() if k_ == 'all'}
 summary['poolsAgree'] = {k_: v_ for k_, v_ in summary['poolsAgree'].items() if k_ == 'all'}
 for e in edges: e.pop('conf', None); e.pop('confNote', None)
-summary['nProbableMoved'] = len(PROB_ROWS)
+summary['nUnlabelledMoved'] = len(PROB_ROWS)
 # candidate headshots: public/photos/<node id>.webp, produced by scripts/photos.py (initials are shown when absent)
 _ph = os.path.join(here, '..', 'public', 'photos')
 photos = {f[:-5]: f'/photos/{f}' for f in sorted(os.listdir(_ph)) if f.endswith('.webp') and f[:-5] in nodes} if os.path.isdir(_ph) else {}
@@ -759,6 +759,17 @@ out = dict(urls=urls, urlLabels=[url_label[i_] for i_ in range(len(urls))], refs
            nodes=list(nodes.values()), edges=edges, pairTogether=pair_together,
            variants=variants_meta, borderlinePairs=borderline_pairs,
            coTargets=targets_core)
+# The full analysis (including the complete-linkage groupings) is kept for internal reference only.
+# The public graph.json carries the pairwise co-assignment shares and nothing about lettered groups.
+_int = os.path.join(here, '..', '..', 'internal')
+if os.path.isdir(_int):
+    json.dump(out, open(os.path.join(_int, 'analysis_full.json'), 'w', encoding='utf-8'), ensure_ascii=False)
+for k_ in ('communities', 'loose', 'ties', 'variants', 'borderlinePairs'): out.pop(k_, None)
+for nd in out['nodes']:
+    for k_ in ('community', 'blocScore', 'loose'): nd.pop(k_, None)
+for k_ in ('border', 'linkage', 'poolsAgree', 'poolsMinAgree', 'minRefused', 'variantPartitions', 'refusedMerges', 'bootGroups', 'bootFate',
+           'bootIntactAll', 'nCommunitiesDistribution', 'robustThreshold', 'nBlocs', 'nLoose', 'bootstrap', 'palette'):
+    summary.pop(k_, None)
 
 # ---------- public downloads: explicit column ALLOWLIST (unknown columns are never published) ----------
 # clean/internal/ is never read.
@@ -823,6 +834,7 @@ for base, cols_allowed in ALLOW.items():
     seen_r = set(); body = []
     for r in rows:
         rr = {k: clean_text(r.get(k, '')) for k in hk}
+        if base == 'unverified_leads': rr = {k: re.sub(r'^Existing Probable edge:\s*', '', v_) for k, v_ in rr.items()}   # internal rating label, not public wording
         if 'snapshot_path' in rr: rr['snapshot_path'] = zip_path(rr['snapshot_path'])
         if base == 'candidates' and curly(rr.get('Candidate')) in pub_cand_notes and 'Notes' in rr: rr['Notes'] = pub_cand_notes[curly(rr['Candidate'])]
         if 'Endorser type' in rr and curly(rr.get('Endorser')) in type_fix: rr['Endorser type'] = type_fix[curly(rr['Endorser'])]
@@ -895,9 +907,7 @@ with open(os.path.join(args.out, 'graph.json'), 'w', encoding='utf-8') as f: f.w
 print(f"nodes={len(nodes)} edges={len(edges)} core={core.number_of_nodes()}/{core.number_of_edges()} k-dist={dict(n_comm_dist)}")
 for cm in comm_meta:
     print(f"  bloc {cm['id']}: weakest={cm['weakest']['p']} mean={cm['mean']} border={cm['borderline']} amb={[(nm(a['t']), nm(a['o']), a['p']) for a in cm['ambiguous']]} targets={[nm(t) for t in cm['targets']]} size={cm['size']}")
-print('  pools agree:', pools_agree, 'boot groups', summary['bootGroups'])
-for k_, vp in summary['variantPartitions'].items(): print('   ', k_, vp)
-print('  refused merges:', summary['refusedMerges'])
+print('  pools agree:', pools_agree)
 print('  variants:', [([nm(x) for x in v_['members']], v_['where'], v_['meanAll']) for v_ in variants_meta])
 print('  borderline pairs:', [(nm(b_['a']), nm(b_['b']), b_['p']) for b_ in borderline_pairs])
 print('  loose:', [(nm(l['id']), [(nm(p_['t']), p_['p']) for p_ in l['partners'][:2]]) for l in loose_meta])

@@ -7,13 +7,12 @@ import { createNodeBorderProgram } from '@sigma/node-border';
 import type { Data, GNode, GEdge } from './types';
 import { logoUrl } from './logos';
 import {
-  commColor, commName, LETTERS, esc, index, listJoin, numWord, chip, nlink, typeGlyph, TYPE_ORDER, TYPE_RAMP,
-  blocName, pct, raceShort, shortName, surname, onColor, plural, pctCut, weakPct, marginLabel, nearMisses,
-  intactNote, intactWords, initials,
+  esc, index, nlink, typeGlyph, TYPE_ORDER, TYPE_RAMP, pct, raceShort, shortName, surname, onColor, initials,
+  nodeColor, RACE_COLOR, GROUP_COLOR, GROUP_LABEL, groupOfType,
 } from './text';
 
 const LEAF = '#c4c4c4', DIM = '#f1f1f1', DIM_BORDER = '#e2e2e2';
-type View = 'coalitions' | 'race';
+type View = 'cands' | 'race';
 const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector(s) as T;
 const fmtDate = (iso: string) => new Date(iso + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
 const norm = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
@@ -29,7 +28,7 @@ async function main() {
   await tick();
   const ix = index(d);
   const { byId } = ix;
-  const S = d.summary; const T = S.robustThreshold;
+  const S = d.summary;
   const edgesOut = new Map<string, GEdge[]>(); const edgesIn = new Map<string, GEdge[]>();
   const memberEdges = d.edges.filter((e) => e.kind === 'member');
   for (const e of d.edges) {
@@ -39,13 +38,14 @@ async function main() {
   }
   const isolated = d.nodes.filter((n) => n.inDeg + n.outDeg === 0 && !memberEdges.some((e) => e.s === n.id || e.t === n.id));
   const isoSet = new Set(isolated.map((n) => n.id));
-  const state = { view: 'coalitions' as View, selected: null as string | null, hovered: null as string | null, showAll: false,
-    colorBy: 'community' as 'community' | 'type', race: d.races.find((r) => r.race === 'Rent Board')?.race || d.races[0].race };
+  const MAXSEL = 5;   // nodes compared at once
+  const state = { view: 'cands' as View, selected: null as string | null, multi: [] as string[], hovered: null as string | null, showAll: false,
+    race: d.races.find((r) => r.race === 'Rent Board')?.race || d.races[0].race };
 
   // ---------- graph ----------
   const g = new Graph({ type: 'directed', multi: false });
   const baseSize = (n: GNode) => (n.isTarget ? 4 + 2.1 * Math.log2(1 + n.inDeg) : n.leaf ? 2.5 : Math.min(8, 2.4 + 1.1 * Math.sqrt(n.outDeg)));
-  for (const n of d.nodes) if (!isoSet.has(n.id)) g.addNode(n.id, { x: n.x, y: n.y, size: baseSize(n), label: n.name, color: commColor(n.community) });
+  for (const n of d.nodes) if (!isoSet.has(n.id)) g.addNode(n.id, { x: n.x, y: n.y, size: baseSize(n), label: n.name, color: nodeColor(n) });
   for (const e of d.edges) if (g.hasNode(e.s) && g.hasNode(e.t) && !g.hasEdge(e.s, e.t)) g.addDirectedEdgeWithKey(e.id, e.s, e.t, { size: 1, kind: e.kind });
 
   await tick();
@@ -54,15 +54,26 @@ async function main() {
   const isCand = (n: GNode) => n.isTarget && !n.analysisEndorser;
 
   let FOCUS: Set<string> | null = null; let RACE_SHARED = new Set<string>();
+  // ACT: the highlighted nodes (hovered, or the compare set, or the one selected); ALLN / SOMEN: linked to all / some of them
+  let ACT: string[] = []; let ALLN = new Set<string>(); let SOMEN = new Set<string>();
+  const comparing = () => state.multi.length > 0;
   function recompute() {
     const f = state.hovered || state.selected;
+    ACT = state.hovered ? [state.hovered] : state.multi.length ? state.multi.filter((x) => g.hasNode(x)) : state.selected ? [state.selected] : [];
+    ALLN = new Set(); SOMEN = new Set();
+    if (ACT.length) {
+      const cnt = new Map<string, number>();
+      for (const a of ACT) for (const m of g.neighbors(a)) if (!ACT.includes(m)) cnt.set(m, (cnt.get(m) || 0) + 1);
+      for (const [m, k] of cnt) (k === ACT.length ? ALLN : SOMEN).add(m);
+    }
     RACE_SHARED = new Set();
     if (state.view === 'race') {
       const cnt = new Map<string, number>();
       for (const c of raceSet()) for (const e of edgesIn.get(c) || []) cnt.set(e.s, (cnt.get(e.s) || 0) + 1);
       for (const [m, k] of cnt) if (k >= 2) RACE_SHARED.add(m);
     }
-    if (f) FOCUS = neighbors(f);
+    if (ACT.length > 1 || (ACT.length && !f)) FOCUS = new Set([...ACT, ...ALLN, ...SOMEN]);
+    else if (f) FOCUS = neighbors(f);
     else if (state.view === 'race') {
       const s = new Set<string>();
       for (const c of raceSet()) { if (!g.hasNode(c)) continue; s.add(c); for (const m of g.inNeighbors(c)) s.add(m); }
@@ -94,6 +105,7 @@ async function main() {
       // endorsers left with no visible link are hidden too
       for (const n of d.nodes) if (g.hasNode(n.id) && !n.isTarget && !H.has(n.id) && !g.neighbors(n.id).some((m) => !H.has(m))) H.add(n.id);
       if (state.selected) H.delete(state.selected);   // the selected node always stays on screen
+      for (const x of state.multi) H.delete(x);
     }
     HIDDEN = H;
   }
@@ -114,31 +126,35 @@ async function main() {
     nodeReducer: (id: string, attr: any) => {
       if (HIDDEN.has(id)) return { ...attr, hidden: true };
       const n = byId.get(id)!; const r: any = { ...attr, zIndex: 1, borderSize: 0 };
-      const active = state.hovered || state.selected;
+      const isAct = ACT.includes(id);
       const inFocus = !FOCUS || FOCUS.has(id);
-      if (state.colorBy === 'type') { r.color = TYPE_RAMP[n.type] || '#999'; r.borderSize = 0.8; r.borderColor = '#ffffff'; }
-      else if (n.community < 0) { r.color = '#ffffff'; r.borderSize = n.isTarget ? 2 : 1.3; r.borderColor = '#4d4d4d'; }
-      else { r.color = commColor(n.community); r.borderSize = 0.8; r.borderColor = '#ffffff'; }
+      // candidates by race (dark outline), endorsers by type
+      r.color = nodeColor(n);
+      if (n.isTarget) { r.borderSize = 1.6; r.borderColor = '#111111'; } else { r.borderSize = 0.8; r.borderColor = '#ffffff'; }
       if (n.isTarget) r.zIndex = 3;
-      if (n.leaf && !state.showAll && !(FOCUS && FOCUS.has(id) && (active || state.view === 'race'))) {
+      if (n.leaf && !state.showAll && !(FOCUS && FOCUS.has(id) && (ACT.length || state.view === 'race'))) {
         r.color = LEAF; r.size = 2.5; r.zIndex = 0; r.borderSize = 0;
       }
       if (!inFocus) { r.color = DIM; r.borderColor = DIM_BORDER; r.borderSize = n.isTarget ? 1 : 0; r.zIndex = 0; }
-      if (state.view === 'race' && !active && RACE_SHARED.has(id)) { r.size = Math.max(attr.size * 1.3, 5); r.zIndex = 4; }
-      if (active === id) { r.zIndex = 6; r.size = Math.max(attr.size * 1.45, 9); r.borderSize = 2.5; r.borderColor = '#111111'; }
-      else if (active && inFocus) r.zIndex = Math.max(r.zIndex, 4);
+      if (state.view === 'race' && !ACT.length && RACE_SHARED.has(id)) { r.size = Math.max(attr.size * 1.3, 5); r.zIndex = 4; }
+      if (isAct) { r.zIndex = 6; r.size = Math.max(attr.size * 1.45, 9); r.borderSize = 2.5; r.borderColor = '#111111'; }
+      else if (ACT.length > 1 && ALLN.has(id)) { r.zIndex = 5; r.size = Math.max(attr.size * 1.35, 6.5); r.borderSize = 2; r.borderColor = '#111111'; }   // linked to every selected node
+      else if (ACT.length && inFocus) r.zIndex = Math.max(r.zIndex, 4);
       return r;
     },
     edgeReducer: (eid: string, attr: any) => {
       const s = g.source(eid), t = g.target(eid); const r: any = { ...attr };
       const sn = byId.get(s)!;
-      const active = state.hovered || state.selected;
       const isMember = attr.kind === 'member';
       if (HIDDEN.has(s) || HIDDEN.has(t)) { r.hidden = true; return r; }
       edgeStyle(); return r;
       function edgeStyle() {
-      if (active) {   // the selected node's own endorsements, drawn dark and heavy; every other line is hidden
-        if (s === active || t === active) { r.color = '#111111'; r.size = isMember ? 2.6 : 2; r.zIndex = 3; } else r.hidden = true;
+      if (ACT.length) {   // the selected nodes' own links, drawn dark and heavy (lighter for nodes linked to only some of them); every other line is hidden
+        const sa = ACT.includes(s), ta = ACT.includes(t);
+        if (sa || ta) {
+          const other = sa ? t : s; const strong = ACT.length < 2 || ALLN.has(other) || (sa && ta);
+          r.color = strong ? '#111111' : 'rgba(80,80,80,0.45)'; r.size = strong ? (isMember ? 2.6 : 2) : 1; r.zIndex = strong ? 3 : 2;
+        } else r.hidden = true;
         return r;
       }
       if (isMember) {
@@ -218,17 +234,17 @@ async function main() {
   let peek: string | null = null;   // a node whose name is hovered or focused in the panel or legend
   function labelPlan(): Lab[] {
     const L: Lab[] = []; const narrow = narrowMQ.matches;
-    const active = state.hovered || state.selected;
     const push = (id: string, texts: string[], force = false, weight = 600, dim = false) => {
       if (!g.hasNode(id) || L.some((l) => l.id === id)) return;
       const tx = texts.filter((t, i) => t && texts.indexOf(t) === i);
       L.push({ id, texts: tx, force, weight, dim });
     };
-    if (active) { const n = byId.get(active)!; push(active, [n.name, lblName(n), altName(n)], true, 750); }
-    if (peek && peek !== active && (!FOCUS || FOCUS.has(peek))) { const n = byId.get(peek)!; push(peek, [lblName(n), altName(n)], true, 750); }
+    for (const a of ACT) { const n = byId.get(a)!; push(a, ACT.length > 1 ? [lblName(n), altName(n)] : [n.name, lblName(n), altName(n)], true, 750); }
+    if (ACT.length > 1) for (const a of ALLN) { const n = byId.get(a)!; push(a, [lblName(n), altName(n)], true, 650); }
+    if (peek && !ACT.includes(peek) && (!FOCUS || FOCUS.has(peek))) { const n = byId.get(peek)!; push(peek, [lblName(n), altName(n)], true, 750); }
     // every candidate, at every width (dimmed when outside the focus)
     const cands = d.nodes.filter((n) => n.isTarget && g.hasNode(n.id)).sort((a, b) => Number(!!a.memberOf) - Number(!!b.memberOf) || b.inDeg - a.inDeg);
-    const nbs = active && FOCUS ? [...FOCUS].filter((x) => x !== active) : [];
+    const nbs = ACT.length && FOCUS ? [...FOCUS].filter((x) => !ACT.includes(x)) : [];
     const nbForce = nbs.length <= 40;
     const cn = (n: GNode) => (narrow ? [altName(n)] : [lblName(n), altName(n)]);
     for (const n of cands) if (!FOCUS || FOCUS.has(n.id)) push(n.id, cn(n), true, 650);
@@ -240,7 +256,7 @@ async function main() {
       if (RACE_SHARED.size <= (narrow ? 8 : 16)) [...RACE_SHARED].forEach((id) => { const n = byId.get(id)!; push(id, [lblName(n), altName(n)], false, 550); });
     }
     // a filtered view with few endorsers left: name them too
-    if (HIDDEN.size && !active) {
+    if (HIDDEN.size && !ACT.length) {
       const rest = d.nodes.filter((n) => !n.isTarget && g.hasNode(n.id) && !HIDDEN.has(n.id) && (state.showAll || !n.leaf));
       if (rest.length <= 40) rest.sort((a, b) => b.outDeg - a.outDeg).forEach((n) => push(n.id, [lblName(n), altName(n)], false, 550));
     }
@@ -254,15 +270,14 @@ async function main() {
     const placed: [number, number, number, number][] = [];
     const R = renderer;
     const vp = (id: string) => { if (!R) return pvPos.get(id) || null; const dd: any = R.getNodeDisplayData(id); if (!dd || dd.hidden) return null; const p = R.framedGraphToViewport({ x: dd.x, y: dd.y }); return { x: p.x, y: p.y, r: R.scaleSize(dd.size) }; };
-    const active = state.hovered || state.selected;
     // rings: endorsers shared within a race
     const ringIds = new Set<string>();
-    if (state.view === 'race' && !active) RACE_SHARED.forEach((x) => ringIds.add(x));
+    if (state.view === 'race' && !ACT.length) RACE_SHARED.forEach((x) => ringIds.add(x));
     octx.lineWidth = 1.8; octx.strokeStyle = '#111';
     for (const id of ringIds) { const p = vp(id); if (!p) continue; octx.beginPath(); octx.arc(p.x, p.y, p.r + 3, 0, Math.PI * 2); octx.stroke(); placed.push([p.x - p.r - 3, p.y - p.r - 3, p.x + p.r + 3, p.y + p.r + 3]); }
     // the selected node: a soft halo, a white gap and a heavy dark ring
-    if (active) {
-      const p = vp(active);
+    for (const a of ACT) {
+      const p = vp(a);
       if (p) {
         const R0 = p.r + 4;
         octx.lineWidth = 9; octx.strokeStyle = 'rgba(255, 184, 0, 0.5)'; octx.beginPath(); octx.arc(p.x, p.y, R0 + 8.5, 0, Math.PI * 2); octx.stroke();
@@ -270,16 +285,6 @@ async function main() {
         octx.lineWidth = 3; octx.strokeStyle = '#111111'; octx.beginPath(); octx.arc(p.x, p.y, R0 + 3, 0, Math.PI * 2); octx.stroke();
         placed.push([p.x - R0 - 5, p.y - R0 - 5, p.x + R0 + 5, p.y + R0 + 5]);
       }
-    }
-    // coalition letters inside big nodes (colour-blind redundancy)
-    if (state.colorBy === 'community') {
-      for (const n of d.nodes) {
-        if (n.community < 0 || !g.hasNode(n.id) || (FOCUS && !FOCUS.has(n.id))) continue;
-        const p = vp(n.id); if (!p || p.r < (n.isTarget ? 7 : 6.5)) continue;
-        octx.font = `800 ${Math.max(12, Math.min(13, p.r * 1.1))}px ${FONT}`; octx.textAlign = 'center'; octx.textBaseline = 'middle';
-        octx.fillStyle = onColor(commColor(n.community)); octx.fillText(LETTERS[n.community], p.x, p.y + 0.5);
-      }
-      octx.textAlign = 'left'; octx.textBaseline = 'alphabetic';
     }
     for (const n of d.nodes) if (n.isTarget && g.hasNode(n.id)) { const p = vp(n.id); if (p) placed.push([p.x - p.r, p.y - p.r, p.x + p.r, p.y + p.r]); }
     const ovl = (bx: number[]) => placed.reduce((a, b) => a + Math.max(0, Math.min(bx[2], b[2]) - Math.max(bx[0], b[0])) * Math.max(0, Math.min(bx[3], b[3]) - Math.max(bx[1], b[1])), 0);
@@ -399,8 +404,12 @@ async function main() {
     preview.remove();
     renderer.on('afterRender', drawOverlay);
     renderer.on('enterNode', onEnter); renderer.on('leaveNode', onLeave);
-    renderer.on('clickNode', ({ node }) => { hideTip(); state.hovered = null; select(node, stackMQ.matches); });
-    renderer.on('clickStage', () => { hideTip(); if (state.selected) select(null); });
+    renderer.on('clickNode', ({ node, event }) => {
+      hideTip(); state.hovered = null;
+      const o: any = (event as any)?.original;
+      if (comparing() || (o && (o.shiftKey || o.metaKey || o.ctrlKey))) toggle(node); else select(node, stackMQ.matches);
+    });
+    renderer.on('clickStage', () => { hideTip(); if (state.selected && !comparing()) select(null); });
     renderer.refresh();
   }
   const wake = () => ensureSigma();
@@ -446,7 +455,7 @@ async function main() {
   document.addEventListener('error', (e) => { const t = e.target as HTMLElement; if (t instanceof HTMLImageElement && t.parentElement?.classList.contains('av-logo')) t.remove(); }, true);
   const avatar = (n: GNode, size: 'lg' | 'sm' = 'lg') => logoAv(n, size) || (photos[n.id]
     ? `<img class="av av-${size}" src="${esc(photos[n.id])}" alt="" width="${size === 'lg' ? 48 : 24}" height="${size === 'lg' ? 48 : 24}" loading="lazy" decoding="async">`
-    : `<span class="av av-${size} av-i" aria-hidden="true" style="--c:${n.community >= 0 ? commColor(n.community) : '#e9e9e9'};--t:${n.community >= 0 ? onColor(commColor(n.community)) : '#333'}">${esc(initials(n))}</span>`);
+    : `<span class="av av-${size} av-i" aria-hidden="true" style="--c:${nodeColor(n)};--t:${onColor(nodeColor(n))}">${esc(initials(n))}</span>`);
   // endorser groups: the key names first (officials, parties, clubs, unions, organizations, candidates), then everyone else
   const GROUPS: { label: string; types: string[]; key: boolean }[] = [
     { label: 'Elected officials', types: ['Current elected official'], key: true },
@@ -501,17 +510,11 @@ async function main() {
     const cl = closest(id); if (!cl.length) return '';
     return ` Similarly endorsed candidates include: ${cl.map((x, i) => `${nlink(N(x.t))} <span class="pc">${pct(x.p)}</span>${i < cl.length - 1 ? ',' : ''}`).join(' ')}.`;
   };
+  /** the bottom line of a candidate's panel: whose endorsement lists most resemble this one's */
   function placement(n: GNode) {
-    const runs = `<span class="pnote">Percent: share of ${S.nRuns.toLocaleString('en-US')} clustering runs that group the two together.</span>`;
-    if (n.isTarget && !n.analysisEndorser) {
-      if (n.community >= 0) {
-        const c = d.communities[n.community]; const others = c.targets.filter((t) => t !== n.id).map(N);
-        return `<p class="place">${chip(n.community)} In coalition ${LETTERS[c.id]} with ${listJoin(others.map((o) => nlink(o)))}.${simLine(n.id)}</p>${runs}`;
-      }
-      if (!g.hasNode(n.id) || !d.coTargets.includes(n.id)) return n.memberOf ? '' : `<p class="place">${chip(-1)} Not in any coalition.</p>`;
-      return `<p class="place">${chip(-1)} Not in any coalition.${simLine(n.id)}</p>${runs}`;
-    }
-    return '';   // endorsers: the panel is just whom they endorse
+    if (!n.isTarget || n.analysisEndorser || !g.hasNode(n.id) || !d.coTargets.includes(n.id)) return '';
+    const sim = simLine(n.id).trim(); if (!sim) return '';
+    return `<p class="place">${sim}</p><span class="pnote">Percent: how often a clustering program, run ${S.nRuns.toLocaleString('en-US')} times on the endorsements, put the two in the same group.</span>`;
   }
   function nodePanel(id: string) {
     const n = N(id);
@@ -522,7 +525,7 @@ async function main() {
     const isC = n.isTarget && !n.analysisEndorser;
     const sub = [n.type === 'Candidate' || n.type === 'Slate' ? '' : n.type, n.race, !isC && n.title ? n.title : ''].filter(Boolean).join(' · ');
     const site = n.campaignUrl ? `<a class="site" href="${esc(n.campaignUrl)}" target="_blank" rel="noopener">Campaign site<span aria-hidden="true"> ↗</span></a>` : '';
-    let html = `<button class="back" data-back>← Back</button>
+    let html = `<div class="ptools"><button class="back" data-back>← Back</button><button class="cmpbtn" data-compare aria-label="Compare ${esc(n.name)} with others">+ Compare</button></div>
       <header class="nhead">${isC || n.type === 'Slate' || logoUrl(n.name, 48) ? avatar(n) : `<span class="av av-lg av-t" aria-hidden="true">${typeGlyph(n.type)}</span>`}<div><h2 tabindex="-1" id="ntitle">${esc(n.name)}</h2><p class="ntype">${esc(sub || n.type)}${site ? ` · ${site}` : ''}</p></div></header>`;
     // 1. who endorses this candidate (or, for an endorser, whom it endorses)
     // with a filter on, list only the visible links and say how many of the total are shown
@@ -553,22 +556,16 @@ async function main() {
     return html;
   }
 
-  function coalitionsPanel() {
-    const items = d.communities.map((c) => {
-      const pairs: string[] = [];
-      for (let i = 0; i < c.targets.length; i++) for (let j = i + 1; j < c.targets.length; j++) pairs.push(`<li>${esc(shortName(N(c.targets[i])))} & ${esc(shortName(N(c.targets[j])))}: <strong>${pctCut(ix.together(c.targets[i], c.targets[j]), T)}</strong></li>`);
-      return `<li class="coal"><div class="coal-h">${chip(c.id)}<strong>${esc(blocName(ix, c))}</strong></div>
-        <p class="coal-c">${c.targets.map((t) => `${nlink(N(t))} <span class="race-tag">${esc(raceShort(N(t).race))}</span>`).join(', ')}</p>
-        <p class="small">Weakest pair ${esc(shortName(N(c.weakest.a)))} & ${esc(shortName(N(c.weakest.b)))}: <strong>${weakPct(d, c)}</strong>, ${marginLabel(d, c)}${intactWords(c, true) ? `. Intact in ${intactWords(c, true)}${(() => { const nt = intactNote(d, ix, c); return nt ? ` (${esc(nt)})` : ''; })()}` : ''}</p>
-        ${pairs.length > 1 ? `<details class="pairs"><summary>All ${pairs.length} pairs</summary><ul>${pairs.join('')}</ul></details>` : ''}
-        ${Object.keys(c.typeCounts).length ? typeBar(c.typeCounts) : ''}</li>`;
+  /** default panel: every candidate by race, with endorsement counts */
+  function candsPanel() {
+    const rows = d.races.filter((r) => r.candidates.length).map((r) => {
+      const cs = r.candidates.map(N).sort((a, b) => (edgesIn.get(b.id) || []).length - (edgesIn.get(a.id) || []).length || a.name.localeCompare(b.name));
+      return `<section class="crace"><h3><i class="sw" style="background:${RACE_COLOR[r.race] || '#888'}"></i>${esc(r.race)}</h3><ul class="clist2">${cs.map((n) => {
+        const k = (edgesIn.get(n.id) || []).length;
+        return `<li>${avatar(n, 'sm')}${nlink(n)}<span class="num">${k ? k : n.memberOf ? 'via slate' : '0'}</span></li>`;
+      }).join('')}</ul></section>`;
     }).join('');
-    const loose = d.loose.map((l) => `<li>${nlink(N(l.id), undefined, 'strong')} <span class="race-tag">${esc(raceShort(N(l.id).race))}</span><br><span class="small">${(() => { const nm = nearMisses(d).find((x) => x.l.id === l.id); return nm ? `Just short of ${LETTERS[nm.c]}: ${pctCut(nm.v, T)}` : `Similarly endorsed: ${listJoin(closest(l.id, 2).map((p) => `${esc(shortName(N(p.t)))} (${pct(p.p)})`))}`; })()}</span></li>`).join('');
-    const allTypes = [...new Set(d.communities.flatMap((c) => Object.keys(c.typeCounts)))];
-    return `<h2 class="ph">${numWord(S.nBlocs).replace(/^./, (x) => x.toUpperCase())} ${plural(S.nBlocs, 'coalition')}</h2>
-      <p class="pintro">Every pair is grouped together in at least ${pct(T)} of ${S.nRuns.toLocaleString('en-US')} clustering runs. Bars: endorsers by type.</p>
-      <ol class="coals">${items}</ol>${typeKey(allTypes)}
-      <h3>No coalition <span class="cnt">${d.loose.length + isolated.length}</span></h3><ul class="loose">${loose}${isolated.map((n) => `<li>${nlink(n, undefined, 'strong')} <span class="race-tag">${esc(raceShort(n.race))}</span><br><span class="small">No endorsements recorded</span></li>`).join('')}</ul>`;
+    return `<h2 class="ph">Candidates</h2><p class="pintro">Select a name to see who endorses them. Numbers: endorsements.</p>${rows}`;
   }
 
   function racePanel() {
@@ -579,7 +576,7 @@ async function main() {
     const cards = cands.map((n) => {
       const ins = edgesIn.get(n.id) || [];
       const tc = new Map<string, number>(); for (const e of ins) { const t = N(e.s).type; types.add(t); tc.set(t, (tc.get(t) || 0) + 1); }
-      return `<li class="rc">${chip(n.community, commName(ix, d, n.community))}${nlink(n, undefined, 'strong')}<span class="num">${ins.length}</span>${ins.length ? typeBar(tc) : `<p class="small muted">${n.memberOf ? 'No individual endorsements; see the slate' : 'No endorsements recorded'}</p>`}</li>`;
+      return `<li class="rc">${avatar(n, 'sm')}${nlink(n, undefined, 'strong')}<span class="num">${ins.length}</span>${ins.length ? typeBar(tc) : `<p class="small muted">${n.memberOf ? 'No individual endorsements; see the slate' : 'No endorsements recorded'}</p>`}</li>`;
     }).join('');
     const m = new Map<string, string[]>();
     for (const c of r.candidates) for (const e of edgesIn.get(c) || []) { if (!m.has(e.s)) m.set(e.s, []); m.get(e.s)!.push(c); }
@@ -600,44 +597,116 @@ async function main() {
           .filter((x) => x.sh > 0).sort((a, b) => b.p - a.p || b.sh - a.sh).slice(0, 6);
         return `<h4>${esc(u.label)}</h4><table class="mini"><thead><tr><th scope="col">Council candidate</th><th scope="col" class="num">Shared endorsers</th><th scope="col" class="num">Together</th></tr></thead><tbody>${rows.map((x) => `<tr><td>${nlink(x.c)} <span class="race-tag">${esc(raceShort(x.c.race))}</span></td><td class="num">${x.sh}</td><td class="num">${pct(x.p)}</td></tr>`).join('')}</tbody></table>`;
       }).join('');
-      rbc = `<h3>Shared with council candidates</h3><p class="small muted">Together: share of runs in the same cluster.</p>${rbc}`;
+      rbc = `<h3>Shared with council candidates</h3><p class="small muted">Together: how often the clustering program put the two in the same group.</p>${rbc}`;
     }
     return `<h2 class="ph">Compare a race</h2><div class="seg wrap" role="group" aria-label="Race">${opts}</div>
       <ul class="rcs">${cards}</ul>${typeKey([...types])}${rbc}
       <h3>Endorsers shared within the race <span class="cnt">${shared.length}</span></h3>${sharedHtml}`;
   }
 
+  // ---------- compare: up to MAXSEL nodes side by side ----------
+  let capNote = false;
+  function setMulti(m: string[], announce: boolean) {
+    state.selected = null; state.multi = m.slice(0, MAXSEL);
+    computeHidden(); renderFilter(); recompute(); refresh({ skipIndexation: true }); renderPanel(); syncHash();
+    if (!m.length) goHome();
+    if (announce) panel.querySelector<HTMLElement>('#ctitle')?.focus({ preventScroll: true });
+  }
+  /** shift-, cmd- or ctrl-click, "+ Add" in search, or any click while comparing: add the node, or remove it if already in */
+  function toggle(id: string) {
+    let m = state.multi.length ? [...state.multi] : state.selected ? [state.selected] : [];
+    capNote = false;
+    if (m.includes(id)) m = m.filter((x) => x !== id);
+    else if (m.length >= MAXSEL) { capNote = true; renderPanel(); return; }
+    else m.push(id);
+    if (!m.length) { select(null); return; }
+    setMulti(m, false);
+  }
+  const shortN = (n: GNode) => (n.type === 'Slate' ? n.name : /Individual|official|Candidate/.test(n.type) ? surname(n) : n.name);
+  function comparePanel() {
+    const sel = state.multi.map(N);
+    const used = new Set<number>(); const cite = (es: GEdge[]) => { const ns = [...new Set(es.flatMap(refNums))].sort((a, b) => a - b); ns.forEach((x) => used.add(x)); return marker(ns); };
+    const chips = `<ul class="cchips" aria-label="Selected">${sel.map((n) => `<li class="cchip">${avatar(n, 'sm')}${nlink(n, shortN(n))}<button class="cx" data-unsel="${esc(n.id)}" aria-label="Remove ${esc(n.name)}">×</button></li>`).join('')}<li><button class="cclear" data-clear>Clear</button></li></ul>`;
+    let html = `<h2 class="ph" id="ctitle" tabindex="-1">Compare</h2>${chips}`;
+    if (capNote) html += `<p class="small muted" role="status">Up to ${MAXSEL} at a time. Remove one to add another.</p>`;
+    if (sel.length < 2) return html + `<p class="pintro">Add another name: shift-click it on the graph, or use “+ Add” in search.</p>`;
+    // links among the selected themselves (e.g. an official who endorses a candidate)
+    const between: GEdge[] = [];
+    for (const a of sel) for (const e of edgesOut.get(a.id) || []) if (state.multi.includes(e.t)) between.push(e);
+    const ends = sel.filter((n) => !n.isTarget || n.analysisEndorser), cands = sel.filter((n) => n.isTarget && !n.analysisEndorser);
+    if (between.length) html += `<ul class="between">${between.map((e) => `<li>${nlink(N(e.s), shortN(N(e.s)))} endorses ${nlink(N(e.t), shortN(N(e.t)))}${cite([e])}</li>`).join('')}</ul>`;
+    else if (ends.length && cands.length) html += `<p class="between">${sel.length === 2 ? `${esc(shortN(ends[0]))} does not endorse ${esc(shortN(cands[0]))}.` : 'None of them endorses another.'}</p>`;
+    // neighbours through endorsements, respecting the filter
+    const nb = new Map<string, Map<string, GEdge[]>>();   // selected id -> neighbour id -> edges
+    let filtered = false;
+    for (const a of sel) {
+      const m = new Map<string, GEdge[]>();
+      for (const e of [...(edgesIn.get(a.id) || []), ...(edgesOut.get(a.id) || [])]) {
+        const o = e.s === a.id ? e.t : e.s; if (state.multi.includes(o)) continue;
+        if (!shownE(e)) { filtered = true; continue; }
+        (m.get(o) || m.set(o, []).get(o)!).push(e);
+      }
+      nb.set(a.id, m);
+    }
+    const common = [...nb.get(sel[0].id)!.keys()].filter((o) => sel.every((a) => nb.get(a.id)!.has(o)));
+    const both = sel.length === 2 ? 'both' : `all ${sel.length}`;
+    const what = !ends.length ? `endorsers who back ${both}` : !cands.length ? `candidates ${both} endorse` : `people and groups linked to ${both}`;
+    const order = (ids: string[]) => ids.sort((x, y) => GROUPS.indexOf(groupOf(N(x).type)) - GROUPS.indexOf(groupOf(N(y).type)) || (N(y).outDeg + N(y).inDeg) - (N(x).outDeg + N(x).inDeg) || N(x).name.localeCompare(N(y).name));
+    const rows = (ids: string[], edgesFor: (o: string) => GEdge[]) => order(ids).map((o, i) => {
+      const n = N(o);
+      return `<li${i >= LIM ? ' class="more" hidden' : ''}>${logoAv(n, 'sm') || typeGlyph(n.type)}<span class="kr">${nlink(n)}${n.race && n.isTarget ? ` <span class="race-tag">${esc(raceShort(n.race))}</span>` : ''}${cite(edgesFor(o))}</span></li>`;
+    }).join('');
+    const more = (k: number) => (k > LIM ? `<button class="showmore">Show all ${k}</button>` : '');
+    html += `<section class="lead"><div class="banner"><p class="bn"><strong>In common: ${common.length}</strong> <span class="bsub">${what}${filtered ? ' · filter on' : ''}</span></p></div>
+      ${common.length ? `<ul class="klist">${rows(common, (o) => sel.flatMap((a) => nb.get(a.id)!.get(o)!))}</ul>${more(common.length)}` : '<p class="small muted">Nobody in common.</p>'}</section>`;
+    // what each one has alone
+    for (const a of sel) {
+      const only = [...nb.get(a.id)!.keys()].filter((o) => !common.includes(o));
+      if (!only.length) continue;
+      html += `<details class="grp only"><summary><span>Only ${esc(shortN(a))}</span> <span class="cnt">${only.length}</span></summary><ul class="klist">${rows(only, (o) => nb.get(a.id)!.get(o)!)}</ul>${more(only.length)}</details>`;
+    }
+    // similarity for candidate pairs, from the clustering runs
+    const cc = cands.filter((n) => d.coTargets.includes(n.id));
+    if (cc.length >= 2) {
+      const pairs: string[] = [];
+      for (let i = 0; i < cc.length; i++) for (let j = i + 1; j < cc.length; j++) pairs.push(`${esc(shortN(cc[i]))} and ${esc(shortN(cc[j]))} <span class="pc">${pct(ix.together(cc[i].id, cc[j].id))}</span>`);
+      html += `<p class="place">Similarly endorsed: ${pairs.join(', ')}.</p><span class="pnote">Percent: how often a clustering program, run ${S.nRuns.toLocaleString('en-US')} times on the endorsements, put the two in the same group.</span>`;
+    }
+    return html + refList(used);
+  }
+
   function renderPanel() {
-    panel.innerHTML = state.selected ? nodePanel(state.selected) : state.view === 'coalitions' ? coalitionsPanel() : racePanel();
+    panel.innerHTML = comparing() ? comparePanel() : state.selected ? nodePanel(state.selected) : state.view === 'race' ? racePanel() : candsPanel();
     panel.scrollTop = 0;
     updatePill();
   }
   function renderLegend() {
     const L = $('#legend');
-    const items = state.colorBy === 'community'
-      ? d.communities.map((c) => `<li>${chip(c.id)}<span>${esc(blocName(ix, c))}</span></li>`).join('') + `<li><span class="dot none"></span><span>No coalition</span></li>`
-      : TYPE_ORDER.filter((t) => d.nodes.some((n) => n.type === t)).map((t) => `<li><span class="dot" style="background:${TYPE_RAMP[t]}"></span><span>${esc(t)}</span></li>`).join('');
-    L.innerHTML = `<ul>${items}<li><span class="dot" style="background:${LEAF}"></span><span>backs one candidate</span></li></ul>
+    const races = d.races.filter((r) => r.candidates.length).map((r) => `<li><span class="dot cand" style="background:${RACE_COLOR[r.race] || '#888'}"></span><span>${esc(raceShort(r.race))}</span></li>`).join('');
+    const used = new Set(d.nodes.filter((n) => !n.isTarget).map((n) => groupOfType(n.type)));
+    const groups = Object.keys(GROUP_COLOR).filter((k) => used.has(k)).map((k) => `<li><span class="dot" style="background:${GROUP_COLOR[k]}"></span><span>${GROUP_LABEL[k]}</span></li>`).join('');
+    L.innerHTML = `<p class="lh">Candidates, by race</p><ul>${races}</ul><p class="lh">Endorsers</p><ul>${groups}<li><span class="dot" style="background:${LEAF}"></span><span>backs one candidate</span></li></ul>
       <p><span class="lline"></span>endorsement${memberEdges.length ? ' <span class="lline mem"></span>slate link' : ''}${state.view === 'race' ? ' <span class="ringk"></span>endorser shared within the race' : ''} <span class="selk"></span>selected</p>`;
   }
   // ---------- bottom sheet (narrow screens) ----------
   const sheet = $('#sheet'); const handle = $<HTMLButtonElement>('#sheetbtn');
   function setSheet(open: boolean) {
     sheet.classList.toggle('open', open); document.body.classList.toggle('sheet-open', open); handle.setAttribute('aria-expanded', String(open));
-    handle.querySelector('span')!.textContent = open ? 'Hide details' : state.selected ? `Details: ${N(state.selected).name}` : 'Coalitions and races';
+    handle.querySelector('span')!.textContent = open ? 'Hide details' : comparing() ? `Comparing ${state.multi.length}` : state.selected ? `Details: ${N(state.selected).name}` : 'Candidates and races';
   }
   handle.addEventListener('click', () => setSheet(!sheet.classList.contains('open')));
-  function updatePill() { if (stackMQ.matches) setSheet(sheet.classList.contains('open') || !!state.selected); }
+  function updatePill() { if (stackMQ.matches) setSheet(sheet.classList.contains('open') || !!state.selected || comparing()); }
   // ---------- interactions ----------
   function select(id: string | null, fly = true) {
-    const had = state.selected;
-    state.selected = id; recompute(); refresh({ skipIndexation: true }); renderPanel(); syncHash();
+    const had = state.selected || comparing();
+    state.multi = [];
+    state.selected = id; computeHidden(); renderFilter(); recompute(); refresh({ skipIndexation: true }); renderPanel(); syncHash();
     if (id && fly) { if (stackMQ.matches) setTimeout(() => flyTo(id), 260); else flyTo(id); }
     if (!id && had) goHome();
   }
   const tabs = [...document.querySelectorAll<HTMLButtonElement>('[role=tab]')];
   function setView(v: View) {
-    state.view = v; state.selected = null;
+    state.view = v; state.selected = null; state.multi = [];
     tabs.forEach((b) => { const on = b.dataset.view === v; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; });
     panel.setAttribute('aria-labelledby', `tab-${v}`);
     recompute(); refresh({ skipIndexation: true }); renderPanel(); renderLegend(); syncHash();
@@ -656,9 +725,13 @@ async function main() {
     const nb = t.closest<HTMLElement>('[data-node]');
     if (nb) {
       ev.preventDefault(); const id = nb.dataset.node!;
-      select(id); return;
+      const me = ev as MouseEvent;
+      if (me.shiftKey || me.metaKey || me.ctrlKey) toggle(id); else select(id); return;
     }
     if (t.closest('[data-back]')) { select(null); return; }
+    if (t.closest('[data-compare]')) { if (state.selected) setMulti([state.selected], true); return; }
+    const un = t.closest<HTMLElement>('[data-unsel]'); if (un) { setMulti(state.multi.filter((x) => x !== un.dataset.unsel), true); return; }
+    if (t.closest('[data-clear]')) { select(null); return; }
     const rb = t.closest<HTMLElement>('[data-race]'); if (rb) { state.race = rb.dataset.race!; recompute(); refresh({ skipIndexation: true }); renderPanel(); syncHash(); return; }
     const rf = t.closest<HTMLElement>('[data-ref]');
     if (rf) { ev.preventDefault(); const li = panel.querySelector<HTMLElement>(`#pref-${rf.dataset.ref}`); if (li) { (li.closest('details') as HTMLDetailsElement | null)?.setAttribute('open', ''); li.scrollIntoView({ block: 'center' }); li.classList.add('flash'); setTimeout(() => li.classList.remove('flash'), 1200); } return; }
@@ -666,12 +739,11 @@ async function main() {
     if (sm) { sm.previousElementSibling?.querySelectorAll('li.more').forEach((li) => ((li as HTMLElement).hidden = false)); sm.remove(); }
   });
   $<HTMLInputElement>('#showall').addEventListener('change', (e) => { state.showAll = (e.target as HTMLInputElement).checked; setFrame(); fitSheet(); cam?.setState(home()); recompute(); refresh(); renderLegend(); });
-  $<HTMLSelectElement>('#colorby').addEventListener('change', (e) => { state.colorBy = (e.target as HTMLSelectElement).value as any; refresh({ skipIndexation: true }); renderLegend(); });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     const fb = document.getElementById('filterbox') as HTMLDetailsElement | null;
     if (fb?.open) { fb.open = false; fb.querySelector('summary')?.focus(); return; }   // close the filter first
-    if (state.selected) select(null);
+    if (state.selected || comparing()) select(null);
   });
   const setPeek = (ev: Event) => { const t = (ev.target as HTMLElement)?.closest?.<HTMLElement>('[data-node]'); const id = t && ev.type !== 'focusout' && ev.type !== 'mouseout' ? t.dataset.node! : null; if (id !== peek) { peek = id; drawOverlay(); } };
   for (const ev of ['focusin', 'focusout', 'mouseover', 'mouseout']) document.addEventListener(ev, setPeek, { passive: true });
@@ -697,12 +769,22 @@ async function main() {
   const q = $<HTMLInputElement>('#q'); const qres = $('#qres');
   const searchIdx = d.nodes.map((n) => ({ id: n.id, key: norm([n.name, ...n.variants].join(' | ')) }));
   let hits: string[] = []; let hi = 0;
+  // with something selected, each result also gets an "Add" option that puts it in the comparison
+  let opts: { id: string; add: boolean }[] = [];
   function renderHits() {
-    qres.innerHTML = hits.map((id, i) => { const n = N(id); return `<li role="option" id="opt-${i}" aria-selected="${i === hi}" data-hit="${esc(id)}">${n.isTarget ? avatar(n, 'sm') : typeGlyph(n.type)}<span>${esc(n.name)}</span><small>${esc(n.type)}${n.race ? ' · ' + esc(n.race) : ''}</small></li>`; }).join('')
+    const canAdd = !!state.selected || comparing();
+    opts = hits.flatMap((id) => (canAdd && id !== state.selected ? [{ id, add: false }, { id, add: true }] : [{ id, add: false }]));
+    hi = Math.max(0, Math.min(hi, opts.length - 1));
+    qres.classList.toggle('canadd', canAdd);
+    qres.innerHTML = opts.map((o, i) => {
+      const n = N(o.id);
+      if (o.add) { const on = state.multi.includes(o.id); return `<li role="option" class="addopt" id="opt-${i}" aria-selected="${i === hi}" data-add="${esc(o.id)}" aria-label="${on ? 'Remove' : 'Add'} ${esc(n.name)} ${on ? 'from' : 'to'} the comparison">${on ? '− Remove' : '+ Add'}</li>`; }
+      return `<li role="option" id="opt-${i}" aria-selected="${i === hi}" data-hit="${esc(o.id)}" class="${canAdd && o.id !== state.selected ? 'hasadd' : ''}">${n.isTarget ? avatar(n, 'sm') : typeGlyph(n.type)}<span>${esc(n.name)}</span><small>${esc(n.type)}${n.race ? ' · ' + esc(n.race) : ''}</small></li>`;
+    }).join('')
       || (q.value.trim() ? '<li class="none" role="option" aria-disabled="true" aria-selected="false">No match</li>' : '');
     const open = !!q.value.trim();
     qres.hidden = !open; q.setAttribute('aria-expanded', String(open));
-    if (hits.length) q.setAttribute('aria-activedescendant', `opt-${hi}`); else q.removeAttribute('aria-activedescendant');
+    if (opts.length) q.setAttribute('aria-activedescendant', `opt-${hi}`); else q.removeAttribute('aria-activedescendant');
   }
   q.addEventListener('input', () => {
     const s = norm(q.value.trim()); hi = 0;
@@ -711,28 +793,33 @@ async function main() {
     renderHits();
   });
   q.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowDown') { hi = Math.min(hi + 1, hits.length - 1); renderHits(); e.preventDefault(); }
+    if (e.key === 'ArrowDown') { hi = Math.min(hi + 1, opts.length - 1); renderHits(); e.preventDefault(); }
     else if (e.key === 'ArrowUp') { hi = Math.max(hi - 1, 0); renderHits(); e.preventDefault(); }
-    else if (e.key === 'Enter' && hits[hi]) { e.preventDefault(); choose(hits[hi]); }
+    else if (e.key === 'Enter' && opts[hi]) { e.preventDefault(); const o = opts[hi]; if (o.add || e.shiftKey) addFromSearch(o.id); else choose(o.id); }
     else if (e.key === 'Escape') { qres.hidden = true; q.setAttribute('aria-expanded', 'false'); }
   });
-  qres.addEventListener('mousedown', (e) => { const li = (e.target as HTMLElement).closest<HTMLElement>('[data-hit]'); if (li) { e.preventDefault(); choose(li.dataset.hit!); } });
+  qres.addEventListener('mousedown', (e) => {
+    const ad = (e.target as HTMLElement).closest<HTMLElement>('[data-add]'); if (ad) { e.preventDefault(); addFromSearch(ad.dataset.add!); return; }
+    const li = (e.target as HTMLElement).closest<HTMLElement>('[data-hit]'); if (li) { e.preventDefault(); const me = e as MouseEvent; if (me.shiftKey || me.metaKey || me.ctrlKey) addFromSearch(li.dataset.hit!); else choose(li.dataset.hit!); }
+  });
   q.addEventListener('blur', () => setTimeout(() => { qres.hidden = true; q.setAttribute('aria-expanded', 'false'); }, 120));
-  function choose(id: string) { q.value = N(id).name; qres.hidden = true; q.setAttribute('aria-expanded', 'false'); select(id); }
+  function choose(id: string) { q.value = N(id).name; qres.hidden = true; q.setAttribute('aria-expanded', 'false'); if (comparing()) toggle(id); else select(id); }
+  function addFromSearch(id: string) { q.value = ''; qres.hidden = true; q.setAttribute('aria-expanded', 'false'); toggle(id); }
 
   // ---------- hash ----------
   let applying = false;
   function syncHash() {
     if (applying) return;
     const p = new URLSearchParams();
-    if (state.view !== 'coalitions') p.set('view', state.view);
+    if (state.view === 'race') p.set('view', 'race');
     if (state.view === 'race' && state.race !== 'Rent Board') p.set('race', state.race);
     if (filt.hideT.size) {
       const t = [...filt.hideT]; const ind = filt.hideT.has('people') && filt.hideT.has('officials');
       p.set('hide', (ind ? ['individuals', ...t.filter((k) => k !== 'people' && k !== 'officials')] : t).join(','));
     }
     if (filt.hideR.size) p.set('races', RACES.filter((r) => !filt.hideR.has(r)).join(',') || 'none');
-    if (state.selected) p.set('node', state.selected);
+    if (comparing()) p.set('select', state.multi.join(','));
+    else if (state.selected) p.set('node', state.selected);
     const h = p.toString().replace(/%2C/g, ','); const want = location.pathname + (h ? '?' + h : '');
     if (location.pathname + location.search + location.hash !== want) history.replaceState(null, '', want);
   }
@@ -747,9 +834,11 @@ async function main() {
     }
     const rs = hp.get('races'); if (rs) { const on = new Set(rs.split(',')); for (const r of RACES) if (!on.has(r)) filt.hideR.add(r); }
     computeHidden(); renderFilter();
-    setView(v === 'race' ? 'race' : 'coalitions');   // old ?view=bridges links open the coalitions view
+    setView(v === 'race' ? 'race' : 'cands');   // any other view (old ?view=coalitions or ?view=bridges links) opens the default
     const node = hp.get('node');
-    if (node && byId.has(node)) select(node, true);
+    const sel = (hp.get('select') || '').split(',').filter((x, i, a) => byId.has(x) && a.indexOf(x) === i).slice(0, MAXSEL);
+    if (sel.length) setMulti(sel, false);
+    else if (node && byId.has(node)) select(node, true);
     applying = false;
   }
   window.addEventListener('popstate', applyHash);
@@ -770,6 +859,7 @@ async function main() {
   }
   function applyFilter() {
     if (state.selected && filt.hideR.has(N(state.selected).race || '')) state.selected = null;
+    state.multi = state.multi.filter((x) => !filt.hideR.has(N(x).race || ''));
     computeHidden(); renderFilter(); homeMemo = null;
     recompute(); refresh(); renderPanel(); syncHash();
     if (narrowMQ.matches) cam?.setState(home());
@@ -797,6 +887,7 @@ async function main() {
     cands: () => d.nodes.filter((n) => n.isTarget && g.hasNode(n.id)).map((n) => n.id),
     leaf: (id: string) => !!byId.get(id)?.leaf,
     nbrs: () => (state.selected && g.hasNode(state.selected) ? g.neighbors(state.selected) : []),
+    multi: () => [...state.multi], allLinked: () => [...ALLN], someLinked: () => [...SOMEN],
   };
   (window as any).__ready = true;
 }
