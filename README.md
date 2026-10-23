@@ -1,6 +1,10 @@
 # Berkeley endorsements 2026 — network graphic
 
-Static site (Vite + TypeScript + sigma.js/graphology). All analysis is precomputed at build time.
+Network graphic of endorsements in Berkeley's 2026 local elections: who endorses whom, which coalitions form, and how stable they are. Static site (Vite + TypeScript + sigma.js/graphology) plus Python data scripts; all analysis is precomputed at build time.
+
+Live: https://berkeley-endorsements-2026.vercel.app/
+
+Build: `npm install && npm run build` (output in `dist/`). Regenerating the data needs Python with `requirements.txt` installed; see below.
 
 ```
 # 1. data: reads ../clean/*.csv -> public/data/graph.json (+ copies CSV/XLSX for download)
