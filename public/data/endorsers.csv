@@ -1,6 +1,6 @@
 endorser_id,Endorser,Endorser type,Canonical title,candidate_id,Candidates endorsed (count),Candidates endorsed,Pamphlet references (count),Partial slate members endorsed,Name variants seen
 N138954,Alameda County Democratic Party,Political party,,,10,Avery Arbaugh; Carole Marasovic; Ida Martinac; Igor A. Tregub; Jennifer Shanoski; Jenny Wong; Ka'Dijah Brown; Mark Humbert; Sandy Park; Syrak Micael,0,Avery Arbaugh; Ida Martinac,
-N980254,Green Party of Alameda County,Political party,,,11,"Aidan Hill; Berkeley Right to Housing slate; Daria Wrubel; Jennifer Shanoski; Jenny Wong; Ka'Dijah Brown; Laura Babitt; Majdi ""Gaith"" Abuhamdieh; Mari Mendonca; Moni Gangopadhyay; Syrak Micael",0,,ALAMEDA COUNTY GREEN PARTY | Green Party Alameda County | Green Party CA Alameda County
+N980254,Green Party of Alameda County,Political party,,,10,"Aidan Hill; Berkeley Right to Housing slate; Daria Wrubel; Jennifer Shanoski; Jenny Wong; Ka'Dijah Brown; Laura Babitt; Majdi ""Gaith"" Abuhamdieh; Moni Gangopadhyay; Syrak Micael",0,,ALAMEDA COUNTY GREEN PARTY | Green Party Alameda County | Green Party CA Alameda County
 N200748,Berkeley Democratic Club,Democratic club,,,9,Carole Marasovic; Igor A. Tregub; Jennifer Shanoski; Jenny Wong; Ka'Dijah Brown; Mark Humbert; Ross Bernet; Sandy Park; Syrak Micael,0,,
 N567217,East Bay Stonewall Democratic Club,Democratic club,,,9,Avery Arbaugh; Carole Marasovic; Ida Martinac; Igor A. Tregub; Jenny Wong; Mark Humbert; Nathan Mizell; Sandy Park; Syrak Micael,0,Avery Arbaugh; Ida Martinac; Nathan Mizell,
 N587915,Wellstone Democratic Renewal Club,Democratic club,,,9,Berkeley Right to Housing slate; Daria Wrubel; Jennifer Shanoski; Jenny Wong; Ka'Dijah Brown; Michael Wallman; Moni Gangopadhyay; Sandy Park; Syrak Micael,0,,
@@ -106,7 +106,7 @@ N453440,Debra R. Sanderson,Individual,"Member, Zoning Adjustments Board & Distri
 N547388,East Bay Democratic Socialists of America,Political/advocacy org,,,2,Berkeley Right to Housing slate; Syrak Micael,0,,EAST BAY DEMOCRATIC SOCIALISTS
 N691324,Fiona Ma,Current elected official,California State Treasurer,,2,Igor A. Tregub; Ross Bernet,0,,
 N789140,Fred Collignon,Former elected official,"Former D8 Councilmember,; UC Berkeley Professor Emeritus,; D8 Resident",,2,Igor A. Tregub; Mark Humbert,0,,
-N790917,Fred M. Feller,Candidate (withdrawn),"Withdrawn candidate, Berkeley City Council D8 (still on ballot)",N790917,2,Mari Mendonca; Michael Wallman,0,,Fred Feller
+N790917,Fred M. Feller,Candidate (withdrawn),"Withdrawn candidate, Berkeley City Council D8 (still on ballot)",N790917,1,Michael Wallman,0,,Fred Feller
 N210953,Gabriel Quinto,Current elected official,"Mayor, El Cerrito",,2,Igor A. Tregub; Ross Bernet,0,,Gabe Quinto
 N961068,George Lippman,Individual,Member of the Berkeley Peace and Justice Commission,,2,Mari Mendonca; Moni Gangopadhyay,1,,
 N603836,Henry Levy,Current elected official,Alameda County Treasurer-Tax Collector; District 4 Neighbor,,2,Igor A. Tregub; Jenny Wong,1,,Hank Levy

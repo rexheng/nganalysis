@@ -80,6 +80,16 @@ PROB_IDS = {col(r, 'edge_id') for r in PROB_ROWS}
 E = [r for r in E if r not in PROB_ROWS]
 ES = [r for r in ES if col(r, 'edge_id') not in PROB_IDS]
 PROB_PAIRS = collections.Counter((col(r, 'Endorser'), col(r, 'Endorses')) for r in PROB_ROWS)
+# A ranking is not an endorsement: ranked rows whose endorser's own source ranks the candidate without endorsing
+# them are dropped (checked against the archived sources, Oct 23 2026).
+RANK_ONLY = {('Green Party of Alameda County', 'Mari Mendonca'),   # voter guide: "#1: Mari Mendonca, #2: Michael Wallman (reluctantly ranked, but not endorsed)"
+             ('Fred M. Feller', 'Mari Mendonca')}                # fredfellerforcouncil.com: endorses Wallman; "suggest ranked-choice voting for ... Mari Mendoca as #2"
+RANK_ROWS = [r for r in E if (col(r, 'Endorser'), col(r, 'Endorses')) in RANK_ONLY and col(r, 'Ranking')]
+assert len(RANK_ROWS) == len(RANK_ONLY), 'ranking-only rows not found'
+RANK_IDS = {col(r, 'edge_id') for r in RANK_ROWS}
+E = [r for r in E if r not in RANK_ROWS]
+ES = [r for r in ES if col(r, 'edge_id') not in RANK_IDS]
+RANK_PAIRS = collections.Counter((col(r, 'Endorser'), col(r, 'Endorses')) for r in RANK_ROWS)
 RACE_ORDER = ['Auditor', 'Council D1', 'Council D4', 'Council D7', 'Council D8', 'Rent Board', 'School Board']
 SLATE = 'Berkeley Right to Housing slate'
 
@@ -812,7 +822,7 @@ for base, cols_allowed in ALLOW.items():
     p_ = os.path.join(C, base + '.csv')
     if not allowed(base + '.csv') or not os.path.exists(p_): continue
     rows = rd(base + '.csv')
-    if base in ('endorsements', 'edge_sources'): rows = [r for r in rows if col(r, 'edge_id') not in PROB_IDS]
+    if base in ('endorsements', 'edge_sources'): rows = [r for r in rows if col(r, 'edge_id') not in PROB_IDS and col(r, 'edge_id') not in RANK_IDS]
     if base == 'endorsers':   # counts and lists without the rows moved to unverified leads
         for r in rows:
             nprob = sum(v_ for (en_, _), v_ in PROB_PAIRS.items() if en_ == r.get('Endorser'))
@@ -820,10 +830,16 @@ for base, cols_allowed in ALLOW.items():
                 r['Candidates endorsed (count)'] = str(int(r['Candidates endorsed (count)']) - nprob)
             for k_ in ('Candidates endorsed', 'Partial slate members endorsed'):
                 if r.get(k_): r[k_] = '; '.join(x for x in r[k_].split('; ') if '(Probable)' not in x)
+            drop_ = {cn_ for (en_, cn_) in RANK_PAIRS if en_ == r.get('Endorser')}
+            if drop_:
+                r['Candidates endorsed (count)'] = str(int(r['Candidates endorsed (count)']) - len(drop_))
+                if r.get('Candidates endorsed'): r['Candidates endorsed'] = '; '.join(x for x in r['Candidates endorsed'].split('; ') if x not in drop_)
     if base == 'candidates':
         for r in rows:
             nprob = sum(v_ for (_, cn_), v_ in PROB_PAIRS.items() if cn_ == r.get('Candidate'))
             if nprob: r['Endorsement count'] = str(int(r['Endorsement count']) - nprob)
+            nrank = sum(v_ for (_, cn_), v_ in RANK_PAIRS.items() if cn_ == r.get('Candidate'))
+            if nrank: r['Endorsement count'] = str(int(r['Endorsement count']) - nrank)
     if base == 'unverified_leads':
         for r0 in PROB_ROWS:
             rows.append({'Organization': col(r0, 'Endorser'), 'Candidate': col(r0, 'Endorses'), 'Race': col(r0, 'Race'),
