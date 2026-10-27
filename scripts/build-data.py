@@ -893,7 +893,7 @@ try:   # spreadsheet regenerated from the allowlisted tables only
     readme = [('Berkeley Nov 3, 2026 local election: endorsement network (public data)',), ('',),
               ('Tab', 'What it is')] + [(k.replace('_', ' ').capitalize(), f'{len(v[1])} rows; same as {k}.csv') for k, v in published_tables.items()] + [
               ('',), ('Endorsements', 'One row per endorser -> candidate or slate. Every source for each endorsement is in Edge sources.'),
-              ('Slate members', 'Slate membership and nomination links. Not endorsements.'),
+              ('Slate members', 'Slate membership links. Not endorsements.'),
               ('Endorsers', f'Everyone who endorses at least one candidate or the slate. Omitted: {zero_dropped} rows for names that endorse no one in this data ({zero_pamph} named only in candidate statements\' "I refer to the following residents" lists; {zero_cand} candidates or the slate, listed in Candidates' + (f'; {zero_other} others' if zero_other else '') + ').'),
               ('Unverified leads', 'Claims found only on aggregator sites or third-party guides. Not drawn as endorsements.'),
               ('Methodology', 'See the methodology section of the published graphic.')]
