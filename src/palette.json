@@ -20,7 +20,7 @@
     "people": ["Individual"],
     "officials": ["Current elected official", "Former elected official"],
     "unions": ["Union"],
-    "clubs": ["Democratic club", "Political party"],
+    "clubs": ["Democratic club", "Club", "Political party"],
     "advocacy": ["Political/advocacy org"]
   },
   "other": "#8c8c8c"

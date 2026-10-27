@@ -3,7 +3,7 @@ export interface GNode {
   id: string; name: string; type: string; title: string; variants: string[];
   isCandidate: boolean; isTarget: boolean; race?: string; campaignUrl?: string; endorsementsPage?: string;
   typeNote?: string; analysisEndorser?: boolean;
-  outDeg: number; inDeg: number; leaf: boolean; x: number; y: number; memberOf?: string; status?: string; notes?: Note[];
+  outDeg: number; inDeg: number; inDegAll?: number; grp?: boolean; leaf: boolean; x: number; y: number; memberOf?: string; status?: string; notes?: Note[];
 }
 export interface GSrc { u: number; ty?: string; pg?: string; snap?: string; at?: string; pr?: 1; sh?: 1 }
 export interface GEdge {
@@ -17,7 +17,7 @@ export interface SlateOverlap {
   resamples: number; nSlateEndorsers: number;
 }
 export interface Summary {
-  generated: string; nEdges: number; nEndorsementEdges: number; nMemberEdges: number; nNodes: number; nEndorsers: number; nSingle: number;
+  generated: string; nEdges: number; nEndorsementEdges: number; nMemberEdges: number; nNodes: number; nEndorsers: number; nSingle: number; nGroupEndorsers: number; nGroupSingle: number; nGroupEdges: number;
   nCandidates: number; nCore: number; nCoreEdges: number; runs: number; pools: number; nRuns: number;
   zeroDropped?: { pamphletOnly: number; candidates: number; other: number };
   relCounts: Record<string, number>; typeCounts: Record<string, number>;

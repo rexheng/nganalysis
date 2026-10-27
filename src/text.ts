@@ -12,10 +12,10 @@ export const nodeColor = (n: GNode) => (n.isTarget ? RACE_COLOR[n.race || ''] ||
 export const SLATE = 'Berkeley Right to Housing slate';
 
 // actor types: shapes, and colours from the endorser type groups above
-export const TYPE_ORDER = ['Candidate', 'Candidate (withdrawn)', 'Slate', 'Political party', 'Democratic club', 'Political/advocacy org', 'Union',
+export const TYPE_ORDER = ['Candidate', 'Candidate (withdrawn)', 'Slate', 'Political party', 'Democratic club', 'Club', 'Political/advocacy org', 'Union',
   'Current elected official', 'Former elected official', 'Individual'];
 export const TYPE_SHAPE: Record<string, string> = {
-  'Candidate': '●', 'Candidate (withdrawn)': '○', 'Slate': '◆', 'Political party': '⬟', 'Democratic club': '■', 'Political/advocacy org': '▲', 'Union': '▼',
+  'Candidate': '●', 'Candidate (withdrawn)': '○', 'Slate': '◆', 'Political party': '⬟', 'Democratic club': '■', 'Club': '◼', 'Political/advocacy org': '▲', 'Union': '▼',
   'Current elected official': '★', 'Former elected official': '☆', 'Individual': '•',
 };
 export const TYPE_RAMP: Record<string, string> = {
@@ -156,11 +156,11 @@ export function buildTexts(d: Data): Texts {
   }
 
   // ---- overview figure key + alt ----
-  const used = new Set(d.nodes.filter((n) => !n.isTarget && !n.leaf).map((n) => groupOfType(n.type)));
+  const used = new Set(d.nodes.filter((n) => !n.isTarget && !n.leaf && n.grp).map((n) => groupOfType(n.type)));
   const sw = (c: string) => `<i class="sw" style="background:${c}"></i>`;
   const overviewKey = `<p class="small okey2"><span><b>Candidates</b>, outlined, by race:</span> ${Object.entries(RACE_COLOR).filter(([r]) => d.races.some((x) => x.race === r)).map(([r, c]) => `<span>${sw(c)}${esc(raceShort(r))}</span>`).join(' ')}<br><span><b>Endorsers</b>:</span> ${Object.keys(GROUP_COLOR).filter((k) => used.has(k)).map((k) => `<span>${sw(GROUP_COLOR[k])}${GROUP_LABEL[k]}</span>`).join(' ')}. Dashed: slate link.</p>`;
   const overviewAlt = `Network diagram of the ${S.nCore} most connected candidates and endorsers, each line one endorsement. Candidates are coloured by race and endorsers by type.`;
-  const graphSummary = `Interactive network of ${S.nNodes} candidates and endorsers and ${S.nEndorsementEdges} endorsements. ${overviewAlt} Use search or the side panel to explore by keyboard.`;
+  const graphSummary = `Interactive network of ${d.nodes.filter((n) => n.grp || n.isTarget).length} candidates and endorsers and ${S.nGroupEdges} endorsements. ${overviewAlt} Use search or the side panel to explore by keyboard.`;
   const nCand = d.nodes.filter((n) => n.isTarget && n.type !== 'Slate' && !n.analysisEndorser).length;
   const nSlates = d.nodes.filter((n) => n.isTarget && n.type === 'Slate').length;
   const statsLine = `${S.nEndorsementEdges.toLocaleString('en-US')} endorsements · ${S.nEndorsers} endorsers · ${nRaces} races`;

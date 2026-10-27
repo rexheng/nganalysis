@@ -132,11 +132,20 @@ with sync_playwright() as p:
         c['deeplink_legacy_hash'] = pg.locator('#panel h2').first.inner_text()
         # ---------- filter: endorser types and races ----------
         fr = c['filter'] = {}
+        # groups only: no switch, no individual/official chips; old links still load
+        fr['controls'] = {'hideind': pg.locator('#hideind').count(), 'type_chips': pg.eval_on_selector_all('[data-ft]', 'b=>b.map(x=>x.dataset.ft)'),
+            'individual_in_graph': pg.evaluate("window.__test.byName('Ben Bartlett') || null")}
         pg.goto(URL + f'/?hide=individuals&node={nid}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(800)
-        fr['hide_individuals'] = {'state': pg.evaluate('window.__test.filt()'), 'banner': pg.locator('#panel .banner').first.inner_text(),
-            'individual_visible': pg.evaluate("window.__test.visible(window.__test.byName('Ben Bartlett'))"), 'url': pg.evaluate('location.search')}
-        shoot_panel(pg, mob, f'{OUT}/{name}-filter-hideind-tregub.png')
-        pg.goto(URL + '/?hide=individuals&races=Rent%20Board'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(800)
+        fr['legacy_hide_individuals'] = {'state': pg.evaluate('window.__test.filt()'), 'banner': pg.locator('#panel .banner').first.inner_text(),
+            'h2': pg.locator('#panel h2').first.inner_text(), 'url': pg.evaluate('location.search')}
+        bb = next(n['id'] for n in json.loads(urllib.request.urlopen(URL + '/data/graph.json').read())['nodes'] if n['name'] == 'Ben Bartlett')
+        pg.goto(URL + f'/?select={bb},{nid}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(800)
+        fr['legacy_select_individual'] = {'multi': pg.evaluate('window.__test.multi()'), 'node': pg.evaluate('window.__test.state.selected'), 'h2': pg.locator('#panel h2').first.inner_text()}
+        for who, fn in (('Mark Humbert', 'humbert'), ('The Daily Californian Editorial Board', 'dailycal'), ('Mari Mendonca', 'mendonca')):
+            wid = pg.evaluate(f"window.__test.byName({json.dumps(who)})")
+            pg.goto(URL + f'/?node={wid}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(1500)
+            c[f'{fn}_panel_text'] = pg.locator('#panel').inner_text(); shoot_panel(pg, mob, f'{OUT}/{name}-panel-{fn}.png')
+        pg.goto(URL + '/?hide=unions&races=Rent%20Board'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(800)
         fr['combined'] = {'state': pg.evaluate('window.__test.filt()'), 'tregub_visible': pg.evaluate(f"window.__test.visible('{nid}')"),
             'slate_visible': pg.evaluate("window.__test.visible(window.__test.byName('Berkeley Right to Housing slate'))"), 'count': pg.locator('#fcount').inner_text()}
         pg.screenshot(path=f'{OUT}/{name}-filter-combined.png')
@@ -157,14 +166,14 @@ with sync_playwright() as p:
         c['landing_tools_fit'] = pg.evaluate("(()=>{const r=document.querySelector('.ab-tools').getBoundingClientRect();return {w:Math.round(r.width),h:Math.round(r.height),hscroll:document.documentElement.scrollWidth>innerWidth}})()")
         # ---------- compare (multi-select) ----------
         cm = c['compare'] = {}
-        mid = pg.evaluate("window.__test.byName('Syrak Micael')"); bid = pg.evaluate("window.__test.byName('Ben Bartlett')")
+        mid = pg.evaluate("window.__test.byName('Syrak Micael')"); bid = pg.evaluate("window.__test.byName('Daria Wrubel')")
         CMP = """(()=>{const P=document.getElementById('panel');return {multi: window.__test.multi(), all_linked: window.__test.allLinked().length, some_linked: window.__test.someLinked().length,
           chips: P.querySelectorAll('.cchip').length, banner: (P.querySelector('.banner')||{}).innerText, between: (P.querySelector('.between')||{}).innerText,
           only: [...P.querySelectorAll('.grp.only>summary')].map(s=>s.innerText.replace(/\\s+/g,' ').trim()), markers: P.querySelectorAll('a[data-ref]').length,
           unresolved_markers: [...P.querySelectorAll('a[data-ref]')].filter(a=>!P.querySelector('#pref-'+a.dataset.ref)).length, url: location.search}})()"""
         pg.goto(URL + f'/?select={mid},{bid}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(900)
         cm['deeplink'] = pg.evaluate(CMP)
-        pg.screenshot(path=f'{OUT}/{name}-compare-micael-bartlett.png'); shoot_panel(pg, mob, f'{OUT}/{name}-compare-panel.png')
+        pg.screenshot(path=f'{OUT}/{name}-compare-micael-wrubel.png'); shoot_panel(pg, mob, f'{OUT}/{name}-compare-panel.png')
         if name in ('d1440', 'm390'): cm['panel_text'] = pg.locator('#panel').inner_text()
         pg.add_script_tag(path='/tmp/axe-pkg/node_modules/axe-core/axe.min.js'); cm['axe'] = pg.evaluate(AXE)
         # + Compare in the panel, then "+ Add" in search, by keyboard
@@ -172,7 +181,7 @@ with sync_playwright() as p:
         btn = pg.locator('#panel [data-compare]'); btn.tap() if mob else btn.click(); pg.wait_for_timeout(400)
         cm['after_compare_button'] = pg.evaluate(CMP)
         if mob and pg.evaluate("document.getElementById('sheet').classList.contains('open')"): pg.locator('#sheetbtn').tap(); pg.wait_for_timeout(300)
-        pg.fill('#q', 'Bartlett'); pg.wait_for_timeout(300)
+        pg.fill('#q', 'Wrubel'); pg.wait_for_timeout(300)
         cm['search_add_option'] = pg.locator('#qres [data-add]').count()
         pg.keyboard.press('ArrowDown'); pg.keyboard.press('Enter'); pg.wait_for_timeout(600)
         cm['after_search_add'] = pg.evaluate(CMP)
@@ -191,7 +200,7 @@ with sync_playwright() as p:
         cl = pg.locator('#panel [data-clear]'); cl.tap() if mob else cl.click(); pg.wait_for_timeout(400)
         cm['after_clear'] = [pg.evaluate('window.__test.multi()'), pg.evaluate('location.search'), pg.locator('#panel h2').first.inner_text()]
         # with a filter, and the cap of five
-        pg.goto(URL + f'/?hide=individuals&select={mid},{bid}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(700)
+        pg.goto(URL + f'/?races=Council%20D1,Council%20D7&select={mid},{bid}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(700)
         cm['with_filter'] = pg.evaluate(CMP)
         six = pg.evaluate("window.__test.cands().slice(0,6).join(',')")
         pg.goto(URL + f'/?select={six}'); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(700)

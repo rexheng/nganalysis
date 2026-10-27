@@ -21,7 +21,7 @@ export function methodsHtml(d: Data): string {
 <p>We counted ${S.nEndorsementEdges.toLocaleString('en-US')} endorsements by ${S.nEndorsers} people and groups of ${d.nodes.filter((n) => n.isTarget && n.type !== 'Slate' && !n.analysisEndorser).length} candidates and ${numWord(d.nodes.filter((n) => n.isTarget && n.type === 'Slate').length)} ${plural(d.nodes.filter((n) => n.isTarget && n.type === 'Slate').length, 'slate')}.</p>
 <ul class="mlist">
 <li><strong>Endorsement:</strong> a name on a candidate’s endorsement page, on an organization’s own list or in a candidate statement in the <a href="${esc(vig)}" rel="noopener" target="_blank">county voter guide</a>, as of ${esc(prettyDate(S.accessDates[0]))}. Where an organization publishes its own list, that list is the source. Excluded: the guide’s “I refer to the following residents” lists${S.nUnverifiedLeads ? ` and ${S.nUnverifiedLeads} claims no primary source confirms` : ''}.</li>
-<li><strong>Similarly endorsed:</strong> a standard clustering program (Louvain, networkx) sorted the endorsement network into groups ${S.nRuns.toLocaleString('en-US')} times on shuffled input, leaving out endorsers of a single candidate. The percent for two candidates is the share of runs that put them in the same group.${ix.slate ? ` The slate counts as one participant, linked to its ${numWord(ix.slateMembers.length)} members.` : ''}</li>
+<li><strong>Similarly endorsed:</strong> a standard clustering program (Louvain, networkx) sorted the group endorsement network into groups ${S.nRuns.toLocaleString('en-US')} times on shuffled input, leaving out endorsers of a single candidate. The percent for two candidates is the share of runs that put them in the same group.${ix.slate ? ` The slate counts as one participant, linked to its ${numWord(ix.slateMembers.length)} members.` : ''}</li>
 <li><strong>Caveat:</strong> campaign pages are self-reported and range from zero to ${Math.max(...d.nodes.filter((n) => n.isTarget).map((n) => n.inDeg))} names, so long lists look more central. An endorsement is a public signal, not money or votes.</li>
 </ul>
 <h2 id="data">Data</h2>
@@ -59,7 +59,7 @@ Generated ${builtPT(d)} Pacific time from the cleaned dataset. Every number belo
 ${wd.length ? `- ${wd.map((n) => n.name).join(', ')} withdrew and ${wd.length > 1 ? 'are' : 'is'} analysed only as ${wd.length > 1 ? 'endorsers' : 'an endorser'}.\n` : ''}
 ## Similarly endorsed candidates
 
-1. Network: undirected, unweighted. Endorsers with exactly one endorsement (${S.nSingle} of ${S.nEndorsers}) are removed, leaving ${S.nCore} actors and ${S.nCoreEdges} links.
+1. Network: undirected, unweighted, groups only. Groups with exactly one endorsement (${S.nGroupSingle} of ${S.nGroupEndorsers}) are removed, leaving ${S.nCore} actors and ${S.nCoreEdges} links.
 2. Louvain clustering (networkx, resolution 1.0), ${S.pools} independent batches of ${S.runs.toLocaleString('en-US')} runs, node and edge order shuffled every run (${S.nRuns.toLocaleString('en-US')} runs in all).
 3. For each pair of candidates, the share of runs that put them in the same group. A candidate's panel lists the three candidates with the highest shares. The groups themselves are not reported: they vary from run to run.
 
@@ -69,7 +69,7 @@ The findings page uses raw counts of shared endorsers. graph.json (slateOverlap)
 
 ## Colour
 
-Candidates are coloured by race and outlined; endorsers are coloured by type: individuals, elected officials, unions, clubs and parties, and advocacy groups.
+Candidates are coloured by race and outlined; endorsers are coloured by type: unions, clubs and parties, and advocacy groups.
 
 ## Candidates
 

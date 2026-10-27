@@ -25,6 +25,11 @@ const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
 async function main() {
   const d: Data = await fetch('/data/graph.json').then((r) => r.json());
+  // the graph shows groups only (plus candidates and the slate); the downloads keep every endorser
+  const byIdAll = new Map(d.nodes.map((n) => [n.id, n]));
+  d.nodes = d.nodes.filter((n) => n.grp || n.isTarget);
+  const kept = new Set(d.nodes.map((n) => n.id));
+  d.edges = d.edges.filter((e) => kept.has(e.s) && kept.has(e.t) && (e.kind === 'member' || !!byIdAll.get(e.s)?.grp));
   await tick();
   const ix = index(d);
   const { byId } = ix;
@@ -84,10 +89,8 @@ async function main() {
 
   // ---------- filter: endorser types and races (AND); candidates stay unless their race is off ----------
   const FTYPES = [
-    { k: 'people', label: 'Individuals', types: ['Individual'] },
-    { k: 'officials', label: 'Elected officials', types: ['Current elected official', 'Former elected official'] },
     { k: 'unions', label: 'Unions', types: ['Union'] },
-    { k: 'clubs', label: 'Clubs and parties', types: ['Democratic club', 'Political party'] },
+    { k: 'clubs', label: 'Clubs and parties', types: ['Democratic club', 'Club', 'Political party'] },
     { k: 'advocacy', label: 'Advocacy groups', types: ['Political/advocacy org'] },
   ];
   const RACES = d.races.map((r) => r.race);
@@ -419,7 +422,7 @@ async function main() {
     if (!hoverMQ.matches) return;
     state.hovered = node; recompute(); refresh({ skipIndexation: true });
     const n = byId.get(node)!;
-    tip.innerHTML = `<strong>${esc(n.name)}</strong><span>${esc(n.type)}${n.race ? ' · ' + esc(n.race) : ''}</span><span>${n.outDeg ? `Endorses ${n.outDeg}` : ''}${n.outDeg && n.inDeg ? ' · ' : ''}${n.inDeg ? `Endorsed by ${n.inDeg}` : ''}</span>`;
+    tip.innerHTML = `<strong>${esc(n.name)}</strong><span>${esc(n.type)}${n.race ? ' · ' + esc(n.race) : ''}</span><span>${n.outDeg ? `Endorses ${n.outDeg}` : ''}${n.outDeg && n.inDeg ? ' · ' : ''}${n.inDeg ? `Endorsed by ${n.inDeg} ${n.inDeg === 1 ? 'group' : 'groups'}` : ''}</span>`;
     tip.hidden = false; const w = container.clientWidth; tip.style.left = Math.min(event.x + 14, w - 230) + 'px'; tip.style.top = event.y + 14 + 'px';
     container.style.cursor = 'pointer';
   }
@@ -456,12 +459,11 @@ async function main() {
   const avatar = (n: GNode, size: 'lg' | 'sm' = 'lg') => logoAv(n, size) || (photos[n.id]
     ? `<img class="av av-${size}" src="${esc(photos[n.id])}" alt="" width="${size === 'lg' ? 48 : 24}" height="${size === 'lg' ? 48 : 24}" loading="lazy" decoding="async">`
     : `<span class="av av-${size} av-i" aria-hidden="true" style="--c:${nodeColor(n)};--t:${onColor(nodeColor(n))}">${esc(initials(n))}</span>`);
-  // endorser groups: the key names first (officials, parties, clubs, unions, organizations, candidates), then everyone else
+  // endorser groups: parties, clubs, unions, organizations, candidates, then everyone else
   const GROUPS: { label: string; types: string[]; key: boolean }[] = [
-    { label: 'Elected officials', types: ['Current elected official'], key: true },
-    { label: 'Former elected officials', types: ['Former elected official'], key: true },
     { label: 'Parties', types: ['Political party'], key: true },
     { label: 'Democratic clubs', types: ['Democratic club'], key: true },
+    { label: 'Clubs', types: ['Club'], key: true },
     { label: 'Unions', types: ['Union'], key: true },
     { label: 'Organizations', types: ['Political/advocacy org'], key: true },
     { label: 'Candidates and slates', types: ['Candidate', 'Candidate (withdrawn)', 'Slate'], key: true },
@@ -531,12 +533,13 @@ async function main() {
     // with a filter on, list only the visible links and say how many of the total are shown
     const lead = (label: string, all: GEdge[], es: GEdge[], body: (cite: boolean) => string) => {
       const sr = sharedRef(es); use(es);
-      const cnt = es.length < all.length ? `<strong>${label} ${all.length}</strong> <span class="bsub">· ${es.length} shown (filter on)</span>` : `<strong>${label} ${all.length}</strong>`;
+      const num = label === 'Endorsed by' ? `${all.length} ${all.length === 1 ? 'group' : 'groups'}` : String(all.length);
+      const cnt = es.length < all.length ? `<strong>${label} ${num}</strong> <span class="bsub">· ${es.length} shown (filter on)</span>` : `<strong>${label} ${num}</strong>`;
       return `<section class="lead"><div class="banner"><p class="bn">${cnt}</p>${bannerSrc(sr)}</div>${es.length ? body(!sr) : ''}</section>`;
     };
     const insV = ins.filter(shownE), outsV = outs.filter(shownE);
     if (ins.length) html += lead('Endorsed by', ins, insV, (cite) => endorserGroups(insV, cite));
-    else if (isC) html += `<div class="banner"><p class="bn"><strong>No endorsements recorded</strong></p></div>`;
+    else if (isC) html += `<div class="banner"><p class="bn"><strong>${n.inDegAll ? 'Endorsed by 0 groups' : 'No endorsements recorded'}</strong></p></div>`;
     if (outs.length) html += lead(ins.length ? 'Also endorses' : 'Endorses', outs, outsV, (cite) => targetRows(outsV, cite));
     if (notes) html += `<p class="small notes">${notes}</p>`;
     if (n.typeNote) html += `<p class="small muted">${esc(n.typeNote)}</p>`;
@@ -813,10 +816,7 @@ async function main() {
     const p = new URLSearchParams();
     if (state.view === 'race') p.set('view', 'race');
     if (state.view === 'race' && state.race !== 'Rent Board') p.set('race', state.race);
-    if (filt.hideT.size) {
-      const t = [...filt.hideT]; const ind = filt.hideT.has('people') && filt.hideT.has('officials');
-      p.set('hide', (ind ? ['individuals', ...t.filter((k) => k !== 'people' && k !== 'officials')] : t).join(','));
-    }
+    if (filt.hideT.size) p.set('hide', [...filt.hideT].join(','));
     if (filt.hideR.size) p.set('races', RACES.filter((r) => !filt.hideR.has(r)).join(',') || 'none');
     if (comparing()) p.set('select', state.multi.join(','));
     else if (state.selected) p.set('node', state.selected);
@@ -830,7 +830,7 @@ async function main() {
     if (race && d.races.some((r) => r.race === race)) state.race = race;
     filt.hideT.clear(); filt.hideR.clear();
     for (const k of (hp.get('hide') || '').split(',').filter(Boolean)) {
-      if (k === 'individuals') { filt.hideT.add('people'); filt.hideT.add('officials'); } else if (FTYPES.some((f) => f.k === k)) filt.hideT.add(k);
+      if (FTYPES.some((f) => f.k === k)) filt.hideT.add(k);   // old 'individuals', 'people', 'officials' keys: nothing to hide
     }
     const rs = hp.get('races'); if (rs) { const on = new Set(rs.split(',')); for (const r of RACES) if (!on.has(r)) filt.hideR.add(r); }
     computeHidden(); renderFilter();
@@ -850,7 +850,6 @@ async function main() {
   function renderFilter() {
     fbox.querySelectorAll<HTMLButtonElement>('[data-ft]').forEach((b) => b.setAttribute('aria-pressed', String(!filt.hideT.has(b.dataset.ft!))));
     fbox.querySelectorAll<HTMLButtonElement>('[data-fr]').forEach((b) => b.setAttribute('aria-pressed', String(!filt.hideR.has(b.dataset.fr!))));
-    $<HTMLInputElement>('#hideind').checked = filt.hideT.has('people') && filt.hideT.has('officials');
     const k = filt.hideT.size + filt.hideR.size; const fc = $('#fcount');
     fc.hidden = !k; fc.textContent = String(k); fc.setAttribute('aria-label', `${k} active`);
     const tot = g.order, vis = tot - [...HIDDEN].filter((id) => g.hasNode(id)).length;
@@ -869,11 +868,6 @@ async function main() {
     if (b.dataset.ft) { const k = b.dataset.ft; filt.hideT.has(k) ? filt.hideT.delete(k) : filt.hideT.add(k); applyFilter(); }
     else if (b.dataset.fr) { const r = b.dataset.fr; filt.hideR.has(r) ? filt.hideR.delete(r) : filt.hideR.add(r); applyFilter(); }
     else if (b.id === 'freset') { filt.hideT.clear(); filt.hideR.clear(); applyFilter(); }
-  });
-  $<HTMLInputElement>('#hideind').addEventListener('change', (e) => {
-    const on = (e.target as HTMLInputElement).checked;
-    for (const k of ['people', 'officials']) on ? filt.hideT.add(k) : filt.hideT.delete(k);
-    applyFilter();
   });
   document.addEventListener('click', (e) => { if (fbox.open && !fbox.contains(e.target as Node)) fbox.open = false; });
 

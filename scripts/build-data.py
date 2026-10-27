@@ -82,8 +82,9 @@ ES = [r for r in ES if col(r, 'edge_id') not in PROB_IDS]
 PROB_PAIRS = collections.Counter((col(r, 'Endorser'), col(r, 'Endorses')) for r in PROB_ROWS)
 # A ranking is not an endorsement: ranked rows whose endorser's own source ranks the candidate without endorsing
 # them are dropped (checked against the archived sources, Oct 23 2026).
-RANK_ONLY = {('Green Party of Alameda County', 'Mari Mendonca'),   # voter guide: "#1: Mari Mendonca, #2: Michael Wallman (reluctantly ranked, but not endorsed)"
-             ('Fred M. Feller', 'Mari Mendonca')}                # fredfellerforcouncil.com: endorses Wallman; "suggest ranked-choice voting for ... Mari Mendoca as #2"
+# (Green Party of Alameda County -> Mari Mendonca is kept: the guide says her answers "gave us enough information to endorse her";
+#  its #2, Michael Wallman, "reluctantly ranked, but not endorsed", was never an edge.)
+RANK_ONLY = {('Fred M. Feller', 'Mari Mendonca')}                # fredfellerforcouncil.com: endorses Wallman; "suggest ranked-choice voting for ... Mari Mendoca as #2"                # fredfellerforcouncil.com: endorses Wallman; "suggest ranked-choice voting for ... Mari Mendoca as #2"
 RANK_ROWS = [r for r in E if (col(r, 'Endorser'), col(r, 'Endorses')) in RANK_ONLY and col(r, 'Ranking')]
 assert len(RANK_ROWS) == len(RANK_ONLY), 'ranking-only rows not found'
 RANK_IDS = {col(r, 'edge_id') for r in RANK_ROWS}
@@ -236,12 +237,20 @@ for nd in nodes.values():   # 'Slate' is only meaningful for a slate on the ball
         nd['typeNote'] = 'A political organization (not a slate on the ballot).'
 
 # ---------- graphs ----------
-D = nx.DiGraph(); D.add_nodes_from(nodes)
+# The network is groups only: individuals, elected officials (current and former) and candidates endorsing
+# other candidates stay in the data and the downloads but not in the graph or the similarity analysis.
+GROUP_TYPES = {'Political party', 'Democratic club', 'Club', 'Political/advocacy org', 'Union'}
+for nd in nodes.values(): nd['grp'] = nd['type'] in GROUP_TYPES
+def in_net(n): return nodes[n]['grp'] or nodes[n].get('isTarget')
+D_all = nx.DiGraph(); D_all.add_nodes_from(nodes)
 for e in edges:
-    if e['kind'] == 'endorsement': D.add_edge(e['s'], e['t'])
+    if e['kind'] == 'endorsement': D_all.add_edge(e['s'], e['t'])
+D = nx.DiGraph(); D.add_nodes_from([n for n in nodes if in_net(n)])
+for e in edges:
+    if e['kind'] == 'endorsement' and nodes[e['s']]['grp']: D.add_edge(e['s'], e['t'])
 U = nx.Graph(D.to_undirected())
 for e in edges:
-    if e['kind'] == 'member': U.add_edge(e['s'], e['t'])   # membership ties count in the structure
+    if e['kind'] == 'member' and in_net(e['s']): U.add_edge(e['s'], e['t'])   # membership ties count in the structure
 deg = dict(U.degree())
 cand_ids = {name2id[n] for n in cand_names}
 leaves = {n for n in U if deg[n] == 1 and n not in cand_ids}
@@ -255,7 +264,7 @@ core.remove_nodes_from([n for n in list(core) if core.degree(n) == 0])
 def nm(n): return nodes[n]['name']
 for n in nodes:
     nd = nodes[n]
-    if nd.get('isTarget') and nd['type'] == 'Candidate (withdrawn)' and D.in_degree(n) == 0:
+    if nd.get('isTarget') and nd['type'] == 'Candidate (withdrawn)' and n in D and D.in_degree(n) == 0 and D.out_degree(n) > 0:
         nd['analysisEndorser'] = True
 is_ctarget = lambda n: nodes[n].get('isTarget') and not nodes[n].get('analysisEndorser')
 import random, numpy as np
@@ -301,8 +310,9 @@ ROBUST = 0.75; BORDER = 0.05
 targets_core = sorted([n for n in core if is_ctarget(n)], key=nm)
 tix = {t: i for i, t in enumerate(targets_core)}
 def build_core(drop_edges):
-    G = nx.Graph(); G.add_nodes_from(nodes)
+    G = nx.Graph(); G.add_nodes_from(D)
     for e in edges:
+        if not in_net(e['s']) or (e['kind'] == 'endorsement' and not nodes[e['s']]['grp']): continue
         if e['kind'] == 'endorsement' and (e['s'], e['t']) in drop_edges: continue
         G.add_edge(e['s'], e['t'])
     dg = dict(G.degree()); lv = {x for x in G if dg[x] == 1 and x not in cand_ids}
@@ -436,20 +446,21 @@ for t in loose:
 
 # ---------- per-node attributes ----------
 for n in nodes:
-    nodes[n]['community'] = comm[n]
-    nodes[n]['outDeg'] = D.out_degree(n); nodes[n]['inDeg'] = D.in_degree(n)
+    nodes[n]['community'] = comm.get(n, -1)
+    nodes[n]['outDeg'] = D.out_degree(n) if n in D else 0; nodes[n]['inDeg'] = D.in_degree(n) if n in D else 0
+    nodes[n]['inDegAll'] = D_all.in_degree(n)
     nodes[n]['leaf'] = n in leaves
     if n in end_bloc_score: nodes[n]['blocScore'] = end_bloc_score[n]
     if is_ctarget(n) and n in core and comm[n] < 0: nodes[n]['loose'] = True
 
 # ---------- coalition survival: drop 10% of endorsements, re-cluster from scratch, same rule ----------
-end_edges = [(e['s'], e['t']) for e in edges if e['kind'] == 'endorsement']
-mem_edges = [(e['s'], e['t']) for e in edges if e['kind'] == 'member']
+end_edges = [(e['s'], e['t']) for e in edges if e['kind'] == 'endorsement' and nodes[e['s']]['grp']]
+mem_edges = [(e['s'], e['t']) for e in edges if e['kind'] == 'member' and in_net(e['s'])]
 BOOT = 200; BOOT_RUNS = 1000
 def boot_rep(seed):
     rng_ = random.Random(1_000_003 * (seed + 1))
     keep = [e_ for e_ in end_edges if rng_.random() >= 0.10]
-    G = nx.Graph(); G.add_nodes_from(nodes); G.add_edges_from(keep); G.add_edges_from(mem_edges)
+    G = nx.Graph(); G.add_nodes_from(D); G.add_edges_from(keep); G.add_edges_from(mem_edges)
     dg = dict(G.degree()); lv = {x for x in G if dg[x] == 1 and not is_ctarget(x) and not nodes[x].get('isTarget')}
     Gc = G.subgraph([x for x in G if x not in lv and dg[x] > 0]).copy()
     nl = sorted(Gc.nodes()); el = sorted(tuple(sorted(e_)) for e_ in Gc.edges()); ixx = {x: i for i, x in enumerate(nl)}
@@ -484,7 +495,7 @@ for bi, cm in enumerate(comm_meta):   # data survival per coalition: intact in h
 
 # endorser sets of every candidate (for the slate comparison below)
 tg_all = [name2id[n] for n in cand_names]
-endorsers_of = {t: set(D.predecessors(t)) for t in tg_all}
+endorsers_of = {t: set(D_all.predecessors(t)) for t in tg_all}   # findings lede: all endorsers
 
 # ---------- headline numbers: whose endorser lists overlap most with the slate page's? ----------
 slate_id = name2id.get(SLATE)
@@ -599,6 +610,7 @@ for _it in range(400):
     moved += 1
 print('hull separation steps:', moved)
 for n in nodes:
+    if n not in pos: continue   # not in the groups-only network
     x, y = pos[n]; nodes[n]['x'] = round(x, 3); nodes[n]['y'] = round(y, 3)
 
 # ---------- reader-facing candidate notes (generated; raw editor notes are never shipped) ----------
@@ -621,7 +633,7 @@ def public_notes(nd):
     if nd['type'] == 'Slate':
         mem = sorted(nodes[x]['name'] for x in nodes if nodes[x].get('memberOf') == nd['id'])
         if mem: out.append(f"Shared page for the slate\u2019s {len(mem)} candidates. Endorsers listed for the whole slate link here; endorsements of individual members link to that member.")
-    if nd['isTarget'] and D.in_degree(nd['id']) == 0: out.append('No endorsements recorded.')
+    if nd['isTarget'] and D_all.in_degree(nd['id']) == 0: out.append('No endorsements recorded.')
     return [x if isinstance(x, dict) else dict(text=x) for x in out]
 for nd in nodes.values():
     if nd.get('isTarget'): nd['notes'] = public_notes(nd)
@@ -629,14 +641,17 @@ for nd in nodes.values():
 
 # summary stats
 PR = rd('pamphlet_references.csv', required=False)
-n_end = len([n for n in nodes if D.out_degree(n) > 0])
-single = len([n for n in nodes if D.out_degree(n) == 1])
+n_end = len([n for n in nodes if D_all.out_degree(n) > 0])
+single = len([n for n in nodes if D_all.out_degree(n) == 1])
+n_gend = len([n for n in D if D.out_degree(n) > 0 and nodes[n]['grp']])
+gsingle = len([n for n in D if D.out_degree(n) == 1 and nodes[n]['grp']])
 summary = dict(
     generated=datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
     cleanFiles={f: datetime.datetime.fromtimestamp(os.path.getmtime(os.path.join(C, f)), datetime.timezone.utc).isoformat(timespec='seconds')
                 for f in ['endorsements.csv', 'endorsers.csv', 'candidates.csv']},
     nEdges=len(edges), nEndorsementEdges=len([e for e in edges if e['kind'] == 'endorsement']), nMemberEdges=len([e for e in edges if e['kind'] == 'member']),
-    nNodes=len(nodes), nEndorsers=n_end, nSingle=single,
+    nNodes=len(nodes), nEndorsers=n_end, nSingle=single, nGroupEndorsers=n_gend, nGroupSingle=gsingle,
+    nGroupEdges=D.number_of_edges(),
     nCandidates=len([n for n in cand_names if n != SLATE]),
     nCore=core.number_of_nodes(), nCoreEdges=core.number_of_edges(),
     runs=POOL, pools=len(SEED_BASES), nRuns=R, border=BORDER, linkage='complete', poolsAgree=pools_agree, poolsMinAgree=pools_min_agree, minRefused=dict(set=[nm(x) for x in min_refused['set']], v=min_refused['v']) if min_refused else None,
@@ -646,7 +661,7 @@ summary = dict(
     nCommunitiesDistribution={str(k): v for k, v in sorted(n_comm_dist.items())},
     relCounts=dict(collections.Counter(e['rel'] for e in edges if e['kind'] == 'endorsement')),
     typeCounts=dict(collections.Counter(nodes[n]['type'] for n in nodes)),
-    endorserTypeCounts=dict(collections.Counter(nodes[n]['type'] for n in nodes if D.out_degree(n) > 0)),
+    endorserTypeCounts=dict(collections.Counter(nodes[n]['type'] for n in nodes if D_all.out_degree(n) > 0)),
     # sources behind endorsement edges only (slate-membership links excluded), one count per distinct URL+page
     sourceTypeCounts=dict(collections.Counter(ty for (u_, pg_, ty) in {(x['u'], x.get('pg', ''), x['ty']) for e in edges if e['kind'] == 'endorsement' for x in e['src']})),
     edgeSourceTypeCounts=dict(collections.Counter(x['ty'] for e in edges if e['kind'] == 'endorsement' for x in e['src'])),

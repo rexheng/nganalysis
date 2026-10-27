@@ -1,6 +1,6 @@
 endorser_id,Endorser,Endorser type,Canonical title,candidate_id,Candidates endorsed (count),Candidates endorsed,Pamphlet references (count),Partial slate members endorsed,Name variants seen
 N138954,Alameda County Democratic Party,Political party,,,10,Avery Arbaugh; Carole Marasovic; Ida Martinac; Igor A. Tregub; Jennifer Shanoski; Jenny Wong; Ka'Dijah Brown; Mark Humbert; Sandy Park; Syrak Micael,0,Avery Arbaugh; Ida Martinac,
-N980254,Green Party of Alameda County,Political party,,,10,"Aidan Hill; Berkeley Right to Housing slate; Daria Wrubel; Jennifer Shanoski; Jenny Wong; Ka'Dijah Brown; Laura Babitt; Majdi ""Gaith"" Abuhamdieh; Moni Gangopadhyay; Syrak Micael",0,,ALAMEDA COUNTY GREEN PARTY | Green Party Alameda County | Green Party CA Alameda County
+N980254,Green Party of Alameda County,Political party,,,11,"Aidan Hill; Berkeley Right to Housing slate; Daria Wrubel; Jennifer Shanoski; Jenny Wong; Ka'Dijah Brown; Laura Babitt; Majdi ""Gaith"" Abuhamdieh; Mari Mendonca; Moni Gangopadhyay; Syrak Micael",0,,ALAMEDA COUNTY GREEN PARTY | Green Party Alameda County | Green Party CA Alameda County
 N200748,Berkeley Democratic Club,Democratic club,,,9,Carole Marasovic; Igor A. Tregub; Jennifer Shanoski; Jenny Wong; Ka'Dijah Brown; Mark Humbert; Ross Bernet; Sandy Park; Syrak Micael,0,,
 N567217,East Bay Stonewall Democratic Club,Democratic club,,,9,Avery Arbaugh; Carole Marasovic; Ida Martinac; Igor A. Tregub; Jenny Wong; Mark Humbert; Nathan Mizell; Sandy Park; Syrak Micael,0,Avery Arbaugh; Ida Martinac; Nathan Mizell,
 N587915,Wellstone Democratic Renewal Club,Democratic club,,,9,Berkeley Right to Housing slate; Daria Wrubel; Jennifer Shanoski; Jenny Wong; Ka'Dijah Brown; Michael Wallman; Moni Gangopadhyay; Sandy Park; Syrak Micael,0,,
@@ -39,7 +39,7 @@ N995704,Cathy Campbell,Individual,President of Berkeley Federation of Teachers (
 N644939,East Bay for Everyone,Political/advocacy org,,,4,Igor A. Tregub; Mark Humbert; Ross Bernet; Syrak Micael,0,,
 N275312,East Bay YIMBY,Political/advocacy org,,,4,Daria Wrubel; Igor A. Tregub; Mark Humbert; Ross Bernet,0,,YIMBY Action
 N443753,Elizabeth Echols,Current elected official,East Bay Regional Parks District Board Director,,4,Carole Marasovic; Igor A. Tregub; Jenny Wong; Mark Humbert,2,,
-N844004,Housing Action Coalition,Political/advocacy org,,,4,Daria Wrubel; Igor A. Tregub; Ross Bernet; Syrak Micael,0,,
+N844004,Housing Action Coalition,Political/advocacy org,,,5,Daria Wrubel; Igor A. Tregub; Mark Humbert; Ross Bernet; Syrak Micael,0,,
 N158454,Ida Martinac,Candidate,Rent Board Commissioner,N158454,4,Daria Wrubel; Igor A. Tregub; Moni Gangopadhyay; Syrak Micael,7,,
 N004988,Jean Walsh,Current elected official,AC Transit Director,,4,Igor A. Tregub; Jenny Wong; Mark Humbert; Ross Bernet,0,,
 N159969,Karen Weinstein,Former elected official,Former Peralta Community College District Trustee,,4,Igor A. Tregub; Jennifer Shanoski; Jenny Wong; Michael Wallman,0,,
@@ -608,3 +608,4 @@ N642654,Yes Duffy,Individual,"Commissioner and Former Chair, Zoning Adjustments 
 N017974,Yesenia Sanchez,Current elected official,Alameda County Sheriff,,1,Igor A. Tregub,0,,
 N161097,Zac Goldstein,Individual,,,1,Jenny Wong,0,,
 N067888,Zac Unger,Current elected official,Oakland City Councilmember,,1,Igor A. Tregub,0,,
+Ne7f5f4a,The Daily Californian Editorial Board,Club,,,6,"Berkeley Right to Housing slate; Daria Wrubel; Jennifer Shanoski; Jenny Wong; Majdi ""Gaith"" Abuhamdieh; Syrak Micael",0,,The Editorial Board
