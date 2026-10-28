@@ -14,6 +14,13 @@ export const LOGO_DOMAINS: Record<string, string> = {
   'Teamsters Joint Council 7': 'teamstersjc7.org',
   'Wellstone Democratic Renewal Club': 'wellstoneclub.org',
   'Sierra Club (SF Bay Chapter)': 'sierraclub.org',
+  'Cal Berkeley Democrats': 'caldems.com',
+  'AFSCME Council 57': 'afscme57.org',
+  'East Bay Young Democrats': 'ebyd.org',
+  'SEIU Local 1021': 'seiu1021.org',
+  'California Young Democrats': 'cayoungdems.net',
+  'National Union of Healthcare Workers': 'nuhw.org',
+  'ACCE Action': 'acceaction.org',
 };
 const KEY: string = import.meta.env.VITE_LOGODEV_KEY || '';
 /** logo URL for an organisation, or null (no confident domain, or no key at build time) */

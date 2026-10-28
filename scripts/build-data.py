@@ -716,6 +716,7 @@ for i_, u in enumerate(urls):
     tys = collections.Counter(x['ty'] for e in cites for x in e['src'] if x['u'] == i_)
     ty = tys.most_common(1)[0][0] if tys else ''
     if 'acvote' in u or ty.lower().startswith('voter guide'): lab = 'Alameda County voter guide'
+    elif ty.lower() == 'news article': lab = SITE_NAMES.get(host(u), host(u))
     elif ty.lower() == PRIMARY:
         lab = collections.Counter(nodes[e['s']]['name'] for e in cites if e['kind'] == 'endorsement').most_common(1)[0][0]
         if host(u) == 'web.archive.org': lab = f'Wayback Machine copy of {lab} page'
@@ -756,6 +757,12 @@ for k in ['normal'] + list(_M):
     L = [_lab(_rgb(h)) if k == 'normal' else _lab(_sim(h, k)) for h in used_pal]
     pal_check[k] = round(min([math.dist(L[i], L[j]) for i in range(len(L)) for j in range(i+1, len(L))] or [0]), 1)
 summary['palette'] = dict(colors=used_pal, minDeltaE=pal_check)
+PRESS = {   # news articles cited as sources: publication date and headline as published
+    'https://www.berkeleyside.org/2026/10/07/berkeley-city-council-district-1-ross-bernet-laura-babitt-daria-wrubel-moni-gangopadhyay-steve-kromer': ('Oct 7, 2026', 'Berkeley City Council District 1: Where candidates stand on housing, Hopkins, Flock and more'),
+    'https://www.berkeleyside.org/2026/10/23/berkeley-district-4-city-council-igor-tregub-majdi-gaith': ('Oct 23, 2026', 'Berkeley City Council District 4: Gaza resolutions, state of downtown fuel bitter race'),
+    'https://www.berkeleyside.org/2026/10/19/berkeley-district-8-humbert-wallman-mendonca-city-council': ('Oct 19, 2026', 'Berkeley City Council District 8: Elmwood housing plan takes center stage'),
+    'https://www.berkeleyside.org/2026/10/21/berkeley-school-board-election-2026': ('Oct 21, 2026', 'Voters have little choice for Berkeley school board election this year. How big a problem is that?'),
+}
 # ---------- central reference list: one entry per source document (URL), numbered for the panel and /findings/ ----------
 def _vg_page(u):
     m = re.search(r'#page=(\d+)$', u); return int(m.group(1)) if m else 0
@@ -766,6 +773,7 @@ for i_, u in enumerate(urls):
     lab = url_label[i_]
     if lab == 'Alameda County voter guide': title = f'Alameda County Voter Information Guide, November 3, 2026, p. {_vg_page(u)}' if _vg_page(u) else 'Alameda County Voter Information Guide, November 3, 2026'
     elif lab.endswith(' campaign site') or lab.endswith(' site') or lab.startswith('Wayback') or lab in ('Ballotpedia', 'Bay Ballot', 'Berkeley Voter Guide Guru'): title = lab
+    elif u in PRESS: title = f'{lab}, {PRESS[u][0]}: \u201c{PRESS[u][1]}\u201d'
     else: title = f'{lab}: endorsements'
     _ref_rows.append(dict(u=i_, title=title, url=u, at=dates, sortk=(lab.lower(), _vg_page(u), u)))
 _ref_rows.sort(key=lambda r_: r_['sortk'])
