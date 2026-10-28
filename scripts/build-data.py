@@ -716,7 +716,9 @@ for i_, u in enumerate(urls):
         else: lab = (own[0] if own else collections.Counter(nodes[e['t']]['name'] for e in cites).most_common(1)[0][0]) + ' campaign site'
     else: lab = {'ballotpedia.org': 'Ballotpedia', 'bayballot.com': 'Bay Ballot', 'berkeley.voterguide.guru': 'Berkeley Voter Guide Guru'}.get(host(u), host(u))
     url_label[i_] = curly(lab)
+SEARCH_ALIASES = {'Majdi Gaith': ['Abuhamdieh']}   # search-only aliases (not shown)
 for nd in nodes.values():
+    nd['variants'] = nd.get('variants', []) + [v for v in SEARCH_ALIASES.get(nd['name'], []) if v not in nd.get('variants', [])]
     nd['name'] = curly(nd['name'])
     if nd.get('variants'): nd['variants'] = [curly(v) for v in nd['variants']]
 for e in edges:
