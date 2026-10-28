@@ -485,6 +485,25 @@ async function main() {
     return `<li>${logoAv(o, 'sm') || typeGlyph(o.type)}<span class="kr">${nlink(o)}${rankTxt(e)}${cite ? marker(refNums(e)) : ''}${desc ? `<span class="desc">${esc(desc)}</span>` : ''}</span></li>`;
   }
   const LIM = 5;   // key names shown per group before "Show all"
+  const fKey = (id: string) => esc(`${N(id).name} ${N(id).type}`.toLowerCase());
+  /** live filter of a long endorser list (search box under "Endorsed by N groups") */
+  function filterEndorsers(inp: HTMLInputElement) {
+    const sec = inp.closest('.lead'); if (!sec) return;
+    const q = inp.value.trim().toLowerCase(); let n = 0;
+    sec.querySelectorAll<HTMLElement>('[data-f]').forEach((el) => {
+      if (el.dataset.h === undefined) el.dataset.h = el.hidden ? '1' : '';
+      const ok = !q || el.dataset.f!.includes(q); if (ok && q) n++;
+      el.hidden = q ? !ok : el.dataset.h === '1';
+    });
+    sec.querySelectorAll<HTMLDetailsElement>('details.grp').forEach((dt) => {
+      if (dt.dataset.o === undefined) dt.dataset.o = dt.open ? '1' : '';
+      const any = !!dt.querySelector('[data-f]:not([hidden])');
+      dt.hidden = !!q && !any; dt.open = q ? any : dt.dataset.o === '1';
+    });
+    sec.querySelectorAll<HTMLElement>('.showmore').forEach((b) => (b.hidden = !!q));
+    sec.querySelector<HTMLElement>('.efnone')!.hidden = !q || n > 0;
+    sec.querySelector<HTMLElement>('[data-efclear]')!.hidden = !q;
+  }
   function endorserGroups(es: GEdge[], cite: boolean) {
     const by = new Map<string, GEdge[]>();
     for (const e of es) { const gl = groupOf(N(e.s).type).label; if (!by.has(gl)) by.set(gl, []); by.get(gl)!.push(e); }
@@ -492,10 +511,10 @@ async function main() {
       const list = by.get(gr.label)!.sort((a, b) => (N(b.s).outDeg - N(a.s).outDeg) || N(a.s).name.localeCompare(N(b.s).name));
       const head = `<summary>${typeGlyph(gr.types[0])}<span>${gr.label}</span> <span class="cnt">${list.length}</span></summary>`;
       if (!gr.key) {   // everyone else: a compact run of names
-        const names = list.slice().sort((a, b) => N(a.s).name.localeCompare(N(b.s).name)).map((e) => `<span class="ci">${nlink(N(e.s))}${rankTxt(e)}${cite ? marker(refNums(e)) : ''}</span>`).join('');
+        const names = list.slice().sort((a, b) => N(a.s).name.localeCompare(N(b.s).name)).map((e) => `<span class="ci" data-f="${fKey(e.s)}">${nlink(N(e.s))}${rankTxt(e)}${cite ? marker(refNums(e)) : ''}</span>`).join('');
         return `<details class="grp">${head}<p class="clist">${names}</p></details>`;   // collapsed: open to see every name
       }
-      const rows = list.map((e, i) => keyRow(e, e.s, cite).replace('<li>', i >= LIM ? '<li class="more" hidden>' : '<li>')).join('');
+      const rows = list.map((e, i) => keyRow(e, e.s, cite).replace('<li>', `<li data-f="${fKey(e.s)}"${i >= LIM ? ' class="more" hidden' : ''}>`)).join('');
       const more = list.length > LIM ? `<button class="showmore">Show all ${list.length}</button>` : '';
       return `<details class="grp" open>${head}<ul class="klist">${rows}</ul>${more}</details>`;
     }).join('');
@@ -542,7 +561,8 @@ async function main() {
       const via = label === 'Endorsed by' ? viaSlate(n) : 0;
       const num = label === 'Endorsed by' ? `${via ? `${via} via slate + ` : ''}${all.length} ${all.length === 1 ? 'group' : 'groups'}` : String(all.length);
       const cnt = es.length < all.length ? `<strong>${label} ${num}</strong> <span class="bsub">· ${es.length} shown (filter on)</span>` : `<strong>${label} ${num}</strong>`;
-      return `<section class="lead"><div class="banner"><p class="bn">${cnt}</p>${bannerSrc(sr)}</div>${es.length ? body(!sr) : ''}</section>`;
+      const finder = label === 'Endorsed by' && isC && all.length > 10 ? `<div class="efind"><input type="search" class="efq" placeholder="Find a group" aria-label="Find a group among ${esc(n.name)}’s endorsers" autocomplete="off" spellcheck="false"><button type="button" class="efx" data-efclear aria-label="Clear search" hidden>×</button><p class="small muted efnone" role="status" hidden>No match</p></div>` : '';
+      return `<section class="lead"><div class="banner"><p class="bn">${cnt}</p>${bannerSrc(sr)}</div>${finder}${es.length ? body(!sr) : ''}</section>`;
     };
     const insV = ins.filter(shownE), outsV = outs.filter(shownE);
     if (ins.length) html += lead('Endorsed by', ins, insV, (cite) => endorserGroups(insV, cite));
@@ -741,11 +761,16 @@ async function main() {
     const rb = t.closest<HTMLElement>('[data-race]'); if (rb) { state.race = rb.dataset.race!; recompute(); refresh({ skipIndexation: true }); renderPanel(); syncHash(); return; }
     if (t.closest('[data-ref]')) return;   // citation numbers open their source in a new tab
     const sm = t.closest<HTMLButtonElement>('.showmore');
-    if (sm) { sm.previousElementSibling?.querySelectorAll('li.more').forEach((li) => ((li as HTMLElement).hidden = false)); sm.remove(); }
+    if (sm) { sm.previousElementSibling?.querySelectorAll('li.more').forEach((li) => { (li as HTMLElement).hidden = false; delete (li as HTMLElement).dataset.h; }); sm.remove(); }
+    const ec = t.closest<HTMLElement>('[data-efclear]');
+    if (ec) { const inp = ec.parentElement!.querySelector<HTMLInputElement>('.efq')!; inp.value = ''; filterEndorsers(inp); inp.focus(); }
   });
+  panel.addEventListener('input', (ev) => { const t = ev.target as HTMLElement; if (t.classList.contains('efq')) filterEndorsers(t as HTMLInputElement); });
   $<HTMLInputElement>('#showall').addEventListener('change', (e) => { state.showAll = (e.target as HTMLInputElement).checked; setFrame(); fitSheet(); cam?.setState(home()); recompute(); refresh(); renderLegend(); });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
+    const ef = e.target as HTMLInputElement | null;
+    if (ef?.classList?.contains('efq') && ef.value) { ef.value = ''; filterEndorsers(ef); return; }   // Escape first clears the group search
     const fb = document.getElementById('filterbox') as HTMLDetailsElement | null;
     if (fb?.open) { fb.open = false; fb.querySelector('summary')?.focus(); return; }   // close the filter first
     if (state.selected || comparing()) select(null);
