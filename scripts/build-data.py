@@ -141,7 +141,8 @@ def src_from(r):
     u = col(r, 'Source', 'source_url', 'url')
     return dict(u=u, ty=col(r, 'Source type', 'source_type', 'source_kind'), pg=col(r, 'voter_guide_page', 'Voter guide page', 'page'),
                 snap=col(r, 'snapshot_path', 'Snapshot path'), at=day(col(r, 'accessed_at', 'Date accessed', 'source_accessed_date')),
-                shot=('screenshot' in col(r, 'capture_method').lower() or col(r, 'snapshot_path').lower().endswith(('.png', '.jpg'))))
+                shot=('screenshot' in col(r, 'capture_method').lower() or col(r, 'snapshot_path').lower().endswith(('.png', '.jpg'))),
+                vis=col(r, 'Note').startswith('Shown as the citation'))   # source chosen as the edge's one visible citation
 es_by_edge = collections.defaultdict(list); es_by_pair = collections.defaultdict(list)
 for r in ES:
     sr = src_from(r)
@@ -171,6 +172,7 @@ def add_edge(s, t, kind, r, i):
         if key in seen:
             for x in uniq:
                 if (x['u'], x.get('pg', '')) == key and sr.get('shot'): x['shot'] = True
+                if (x['u'], x.get('pg', '')) == key and sr.get('vis'): x['vis'] = True; x['at'] = max(x.get('at') or '', sr.get('at') or '')
         if key in seen: continue
         seen.add(key); uniq.append(sr)
     for sr in uniq:
@@ -697,7 +699,7 @@ PRIMARY = 'org endorsement page'
 for e in edges:
     srt = sorted(e['src'], key=lambda x: 0 if x['ty'].lower() == PRIMARY else 1)   # an org's own page is the primary source
     e['src'] = [{k: v for k, v in dict(u=uix[x['u']], ty=x['ty'], pg=x['pg'], snap=x['snap'], at=x['at'],
-                                       pr=1 if x['ty'].lower() == PRIMARY else '', sh=1 if x.get('shot') else '').items() if v != ''} for x in srt]
+                                       pr=1 if x['ty'].lower() == PRIMARY else '', sh=1 if x.get('shot') else '', v=1 if x.get('vis') else '').items() if v != ''} for x in srt]
 # ---------- reader-facing text clean-up: curly quotes in names, tidy titles, source names ----------
 def curly(s_):
     if not s_: return s_

@@ -5,7 +5,7 @@ export interface GNode {
   typeNote?: string; analysisEndorser?: boolean;
   outDeg: number; inDeg: number; inDegAll?: number; grp?: boolean; leaf: boolean; x: number; y: number; memberOf?: string; status?: string; notes?: Note[];
 }
-export interface GSrc { u: number; ty?: string; pg?: string; snap?: string; at?: string; pr?: 1; sh?: 1 }
+export interface GSrc { u: number; ty?: string; pg?: string; snap?: string; at?: string; pr?: 1; sh?: 1; v?: 1 }
 export interface GEdge {
   id: string; s: string; t: string; rel: string; rank: string; rankNote?: string; formality: string; title: string;
   kind: 'endorsement' | 'member'; src: GSrc[]; date: string; asw: string;

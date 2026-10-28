@@ -442,10 +442,10 @@ async function main() {
   // ---------- references: one number per source document, shared with the References list on /findings/ ----------
   const refByU = new Map(d.refs.map((r) => [r.u, r]));
   const fmtDates = (at: string[]) => (!at.length ? '' : at.length === 1 ? fmtDate(at[0]) : `${fmtDate(at[0])} to ${fmtDate(at[at.length - 1])}`);
-  // one visible citation per edge: the best source (org page > press > campaign site > voter guide); the rest stay in the downloads
+  // one visible citation per edge: a source flagged as the citation, else the best (org page > press > campaign site > voter guide); the rest stay in the downloads
   const SRC_RANK: Record<string, number> = { 'org endorsement page': 0, 'news article': 1, 'campaign site': 2, 'voter guide': 3 };
   const srcRank = (ty?: string) => SRC_RANK[(ty || '').toLowerCase()] ?? 4;
-  const refNums = (e: GEdge) => { const b = e.src.filter((x) => refByU.has(x.u)).sort((a, c) => srcRank(a.ty) - srcRank(c.ty))[0]; return b ? [refByU.get(b.u)!.n] : []; };
+  const refNums = (e: GEdge) => { const b = e.src.filter((x) => refByU.has(x.u)).sort((a, c) => (c.v ?? 0) - (a.v ?? 0) || srcRank(a.ty) - srcRank(c.ty))[0]; return b ? [refByU.get(b.u)!.n] : []; };
   const refByN = new Map(d.refs.map((r) => [r.n, r]));
   const marker = (ns: number[]) => (ns.length ? `<sup class="rm">[${ns.map((n) => { const r = refByN.get(n); const t = r ? r.title : `Reference ${n}`; return `<a href="${esc(r ? d.urls[r.u] : `#pref-${n}`)}" target="_blank" rel="noopener" data-ref="${n}" title="${esc(t)}" aria-label="Source ${n}: ${esc(t)} (opens in a new tab)">${n}</a>`; }).join(',')}]</sup>` : '');
   function refList(ns: Set<number>) {
