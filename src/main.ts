@@ -711,7 +711,7 @@ async function main() {
     const races = d.races.filter((r) => r.candidates.length).map((r) => `<li><span class="dot cand" style="background:${RACE_COLOR[r.race] || '#888'}"></span><span>${esc(raceShort(r.race))}</span></li>`).join('');
     const used = new Set(d.nodes.filter((n) => !n.isTarget).map((n) => groupOfType(n.type)));
     const groups = Object.keys(GROUP_COLOR).filter((k) => used.has(k)).map((k) => `<li><span class="dot" style="background:${GROUP_COLOR[k]}"></span><span>${GROUP_LABEL[k]}</span></li>`).join('');
-    L.innerHTML = `<p class="lh">Candidates, by race</p><ul>${races}</ul><p class="lh">Endorsers</p><ul>${groups}<li><span class="dot" style="background:${LEAF}"></span><span>backs one candidate</span></li></ul>
+    L.innerHTML = `<p class="lh">Race category</p><ul>${races}</ul><p class="lh">Endorsers</p><ul>${groups}</ul>
       <p><span class="lline"></span>endorsement${memberEdges.length ? ' <span class="lline mem"></span>slate link' : ''}${state.view === 'race' ? ' <span class="ringk"></span>endorser shared within the race' : ''} <span class="selk"></span>selected</p>`;
   }
   // ---------- bottom sheet (narrow screens) ----------
