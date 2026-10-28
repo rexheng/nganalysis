@@ -32,5 +32,5 @@ export interface Summary {
 export interface Data {
   urls: string[]; urlLabels: string[]; refs: Ref[]; photos?: Record<string, string>; slateOverlap: SlateOverlap | null; summary: Summary;
   races: { race: string; candidates: string[] }[]; nodes: GNode[]; edges: GEdge[];
-  pairTogether: Record<string, number>; coTargets: string[];
+  coTargets: string[];
 }

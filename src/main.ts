@@ -505,19 +505,22 @@ async function main() {
       return `<li>${typeGlyph(t.type)}<span class="kr">${nlink(t)}${t.race && t.type !== 'Slate' ? ` <span class="race-tag">${esc(raceShort(t.race))}</span>` : ''}${rankTxt(e)}${cite ? marker(refNums(e)) : ''}${e.rankNote ? `<span class="desc">${esc(e.rankNote)}</span>` : ''}</span></li>`;
     }).join('')}</ul>`;
   }
-  /** candidates whose endorsements most resemble this one's: the share of clustering runs that group the two together */
+  /** candidates whose endorsements most resemble this one's: the number of group endorsers the two share */
+  const grpBackers = (id: string) => new Set((edgesIn.get(id) || []).filter((e) => e.kind === 'endorsement' && N(e.s).grp).map((e) => e.s));
   function closest(id: string, k = 3) {
-    return d.coTargets.filter((t) => t !== id).map((t) => ({ t, p: ix.together(id, t) })).sort((x, y) => y.p - x.p).slice(0, k).filter((x) => x.p > 0);
+    const A = grpBackers(id);
+    return d.coTargets.filter((t) => t !== id).map((t) => ({ t, p: [...grpBackers(t)].filter((x) => A.has(x)).length })).filter((x) => x.p > 0)
+      .sort((x, y) => y.p - x.p || N(x.t).name.localeCompare(N(y.t).name)).slice(0, k);
   }
   const simLine = (id: string) => {
     const cl = closest(id); if (!cl.length) return '';
-    return ` Similarly endorsed candidates include: ${cl.map((x, i) => `${nlink(N(x.t))} <span class="pc">${pct(x.p)}</span>${i < cl.length - 1 ? ',' : ''}`).join(' ')}.`;
+    return ` Similarly endorsed candidates include: ${cl.map((x, i) => `${nlink(N(x.t))}${i < cl.length - 1 ? ',' : ''}`).join(' ')}.`;
   };
   /** the bottom line of a candidate's panel: whose endorsement lists most resemble this one's */
   function placement(n: GNode) {
     if (!n.isTarget || n.analysisEndorser || !g.hasNode(n.id) || !d.coTargets.includes(n.id)) return '';
     const sim = simLine(n.id).trim(); if (!sim) return '';
-    return `<p class="place">${sim}</p><span class="pnote">Percent: how often a clustering program, run ${S.nRuns.toLocaleString('en-US')} times on the endorsements, put the two in the same group.</span>`;
+    return `<p class="place">${sim}</p>`;
   }
   function nodePanel(id: string) {
     const n = N(id);
@@ -597,11 +600,11 @@ async function main() {
       const endSet = (ids: string[]) => new Set(ids.flatMap((i) => (edgesIn.get(i) || []).map((e) => e.s)));
       rbc = units.map((u) => {
         const U = endSet(u.ids);
-        const rows = council.map((c) => { const C = endSet([c.id]); const sh = [...U].filter((x) => C.has(x)).length; const p = Math.max(...u.ids.map((i) => ix.together(i, c.id))); return { c, sh, p }; })
-          .filter((x) => x.sh > 0).sort((a, b) => b.p - a.p || b.sh - a.sh).slice(0, 6);
-        return `<h4>${esc(u.label)}</h4><table class="mini"><thead><tr><th scope="col">Council candidate</th><th scope="col" class="num">Shared endorsers</th><th scope="col" class="num">Together</th></tr></thead><tbody>${rows.map((x) => `<tr><td>${nlink(x.c)} <span class="race-tag">${esc(raceShort(x.c.race))}</span></td><td class="num">${x.sh}</td><td class="num">${pct(x.p)}</td></tr>`).join('')}</tbody></table>`;
+        const rows = council.map((c) => { const C = endSet([c.id]); const sh = [...U].filter((x) => C.has(x)).length; return { c, sh }; })
+          .filter((x) => x.sh > 0).sort((a, b) => b.sh - a.sh || a.c.name.localeCompare(b.c.name)).slice(0, 6);
+        return `<h4>${esc(u.label)}</h4><table class="mini"><thead><tr><th scope="col">Council candidate</th><th scope="col" class="num">Shared endorsers</th></tr></thead><tbody>${rows.map((x) => `<tr><td>${nlink(x.c)} <span class="race-tag">${esc(raceShort(x.c.race))}</span></td><td class="num">${x.sh}</td></tr>`).join('')}</tbody></table>`;
       }).join('');
-      rbc = `<h3>Shared with council candidates</h3><p class="small muted">Together: how often the clustering program put the two in the same group.</p>${rbc}`;
+      rbc = `<h3>Shared with council candidates</h3>${rbc}`;
     }
     return `<h2 class="ph">Compare a race</h2><div class="seg wrap" role="group" aria-label="Race">${opts}</div>
       <ul class="rcs">${cards}</ul>${typeKey([...types])}${rbc}
@@ -668,13 +671,6 @@ async function main() {
       const only = [...nb.get(a.id)!.keys()].filter((o) => !common.includes(o));
       if (!only.length) continue;
       html += `<details class="grp only"><summary><span>Only ${esc(shortN(a))}</span> <span class="cnt">${only.length}</span></summary><ul class="klist">${rows(only, (o) => nb.get(a.id)!.get(o)!)}</ul>${more(only.length)}</details>`;
-    }
-    // similarity for candidate pairs, from the clustering runs
-    const cc = cands.filter((n) => d.coTargets.includes(n.id));
-    if (cc.length >= 2) {
-      const pairs: string[] = [];
-      for (let i = 0; i < cc.length; i++) for (let j = i + 1; j < cc.length; j++) pairs.push(`${esc(shortN(cc[i]))} and ${esc(shortN(cc[j]))} <span class="pc">${pct(ix.together(cc[i].id, cc[j].id))}</span>`);
-      html += `<p class="place">Similarly endorsed: ${pairs.join(', ')}.</p><span class="pnote">Percent: how often a clustering program, run ${S.nRuns.toLocaleString('en-US')} times on the endorsements, put the two in the same group.</span>`;
     }
     return html + refList(used);
   }

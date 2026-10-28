@@ -64,8 +64,7 @@ export function index(d: Data) {
   }
   const slate = d.nodes.find((n) => n.type === 'Slate' && n.isTarget);
   const slateMembers = d.nodes.filter((n) => slate && n.memberOf === slate.id).map((n) => n.id);
-  const together = (a: string, b: string) => (a === b ? 1 : d.pairTogether[`${a}|${b}`] ?? d.pairTogether[`${b}|${a}`] ?? 0);
-  return { byId, byName, out, inn, slate, slateMembers, together };
+  return { byId, byName, out, inn, slate, slateMembers };
 }
 export type Ix = ReturnType<typeof index>;
 

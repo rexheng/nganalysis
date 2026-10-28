@@ -787,11 +787,11 @@ out = dict(urls=urls, urlLabels=[url_label[i_] for i_ in range(len(urls))], refs
            variants=variants_meta, borderlinePairs=borderline_pairs,
            coTargets=targets_core)
 # The full analysis (including the complete-linkage groupings) is kept for internal reference only.
-# The public graph.json carries the pairwise co-assignment shares and nothing about lettered groups.
+# The public graph.json carries neither the pairwise co-assignment shares nor anything about lettered groups.
 _int = os.path.join(here, '..', '..', 'internal')
 if os.path.isdir(_int):
     json.dump(out, open(os.path.join(_int, 'analysis_full.json'), 'w', encoding='utf-8'), ensure_ascii=False)
-for k_ in ('communities', 'loose', 'ties', 'variants', 'borderlinePairs'): out.pop(k_, None)
+for k_ in ('communities', 'loose', 'ties', 'variants', 'borderlinePairs', 'pairTogether'): out.pop(k_, None)
 for nd in out['nodes']:
     for k_ in ('community', 'blocScore', 'loose'): nd.pop(k_, None)
 for k_ in ('border', 'linkage', 'poolsAgree', 'poolsMinAgree', 'minRefused', 'variantPartitions', 'refusedMerges', 'bootGroups', 'bootFate',

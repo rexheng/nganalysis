@@ -21,7 +21,7 @@ export function methodsHtml(d: Data): string {
 <p>We counted ${S.nEndorsementEdges.toLocaleString('en-US')} endorsements by ${S.nEndorsers} people and groups of ${d.nodes.filter((n) => n.isTarget && n.type !== 'Slate' && !n.analysisEndorser).length} candidates and ${numWord(d.nodes.filter((n) => n.isTarget && n.type === 'Slate').length)} ${plural(d.nodes.filter((n) => n.isTarget && n.type === 'Slate').length, 'slate')}.</p>
 <ul class="mlist">
 <li><strong>Endorsement:</strong> a name on a candidate’s endorsement page, on an organization’s own list or in a candidate statement in the <a href="${esc(vig)}" rel="noopener" target="_blank">county voter guide</a>, as of ${esc(prettyDate(S.accessDates[0]))}. Where an organization publishes its own list, that list is the source. Excluded: the guide’s “I refer to the following residents” lists${S.nUnverifiedLeads ? ` and ${S.nUnverifiedLeads} claims no primary source confirms` : ''}.</li>
-<li><strong>Similarly endorsed:</strong> a standard clustering program (Louvain, networkx) sorted the group endorsement network into groups ${S.nRuns.toLocaleString('en-US')} times on shuffled input, leaving out endorsers of a single candidate. The percent for two candidates is the share of runs that put them in the same group.${ix.slate ? ` The slate counts as one participant, linked to its ${numWord(ix.slateMembers.length)} members.` : ''}</li>
+<li><strong>Similarly endorsed:</strong> ranked by the number of group endorsers two candidates share.${ix.slate ? ` The slate counts as one participant, linked to its ${numWord(ix.slateMembers.length)} members.` : ''}</li>
 <li><strong>Caveat:</strong> campaign pages are self-reported and range from zero to ${Math.max(...d.nodes.filter((n) => n.isTarget).map((n) => n.inDeg))} names, so long lists look more central. An endorsement is a public signal, not money or votes.</li>
 </ul>
 <h2 id="data">Data</h2>
@@ -55,13 +55,12 @@ Generated ${builtPT(d)} Pacific time from the cleaned dataset. Every number belo
 - Excluded: the voter guide’s “I refer to the following residents” lists (${S.nPamphletRefsExcluded ?? 'n/a'} references to ${S.nPamphletPeople ?? 'n/a'} people)${S.nUnverifiedLeads ? `; ${S.nUnverifiedLeads} claims that no primary source confirms (unverified_leads.csv)${S.nUnlabelledMoved ? `, including ${S.nUnlabelledMoved} names on an unlabelled line of an organization’s page` : ''}` : ''}; testimonials not in an endorsement list; website navigation text. Only confirmed endorsements are drawn or analysed.
 - Names were standardized. Actor types: ${typeList.join(', ')}. The printed title decides current versus former official.${rc.length ? ` Ranked-choice preferences printed by sources (${rc.join(', ')}) are kept as attributes; every endorsement counts equally.` : ''}
 - Every endorsement cites at least one source with a URL and an access date; the numbered reference list on the findings page gives one entry per source document (${d.refs.length} in all).
-- The ${ix.slate?.name ?? 'slate'} counts as one participant; its ${ix.slateMembers.length} members${nominators.length ? ` and ${nominators.join(', ')} (which nominated the slate)` : ''} are tied to it by slate links, which count in the similarity measure but are not endorsements.
+- The ${ix.slate?.name ?? 'slate'} counts as one participant; its ${ix.slateMembers.length} members${nominators.length ? ` and ${nominators.join(', ')} (which nominated the slate)` : ''} are tied to it by slate links, which are not endorsements.
 ${wd.length ? `- ${wd.map((n) => n.name).join(', ')} withdrew and ${wd.length > 1 ? 'are' : 'is'} analysed only as ${wd.length > 1 ? 'endorsers' : 'an endorser'}.\n` : ''}
 ## Similarly endorsed candidates
 
 1. Network: undirected, unweighted, groups only. Groups with exactly one endorsement (${S.nGroupSingle} of ${S.nGroupEndorsers}) are removed, leaving ${S.nCore} actors and ${S.nCoreEdges} links.
-2. Louvain clustering (networkx, resolution 1.0), ${S.pools} independent batches of ${S.runs.toLocaleString('en-US')} runs, node and edge order shuffled every run (${S.nRuns.toLocaleString('en-US')} runs in all).
-3. For each pair of candidates, the share of runs that put them in the same group. A candidate's panel lists the three candidates with the highest shares. The groups themselves are not reported: they vary from run to run.
+2. For each pair of candidates, the number of group endorsers they share. A candidate's panel lists the three candidates with the most.
 
 ## Shared endorsers
 
