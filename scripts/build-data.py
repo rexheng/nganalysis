@@ -551,8 +551,17 @@ for l in leaves: leaves_of[next(iter(U[l]))].append(l)
 pos = dandelion_layout(U, core, leaves_of, lambda n: nodes[n]['isTarget'], label_len=lambda n: len(nodes[n]['name']))
 xs = [p[0] for p in pos.values()]; ys = [p[1] for p in pos.values()]
 iso = sorted([n for n in U if deg[n] == 0], key=nm)
-for k, n in enumerate(iso):   # isolated candidates: bottom-right corner, inside the frame
-    pos[n] = (max(xs) - k * 14, min(ys))
+for k, n in enumerate(iso):   # isolated candidates: just outside the same-race candidate nearest the frame edge
+    same = [pos[m] for m in pos if m not in iso and nodes[m].get('isTarget') and nodes[m].get('race') == nodes[n].get('race')]
+    if not same: pos[n] = (max(xs) - k * 14, min(ys)); continue
+    ax, ay = max(same, key=lambda q: math.hypot(*q)); r_ = math.hypot(ax, ay) or 1
+    px, py = ax + 12 * ax / r_, ay + 12 * ay / r_
+    cl_ = lambda x_, y_: (min(max(x_, min(xs)), max(xs)), min(max(y_, min(ys)), max(ys)))
+    t0 = math.atan2(ay, ax)
+    for j_ in range(36):   # step round the anchor until clear of every placed node
+        px, py = cl_(ax + 12 * math.cos(t0 + j_ * math.pi / 18 * (-1) ** j_ * ((j_ + 1) // 2) / max(1, j_)), ay + 12 * math.sin(t0 + j_ * math.pi / 18 * (-1) ** j_ * ((j_ + 1) // 2) / max(1, j_)))
+        if all(math.hypot(px - q[0], py - q[1]) >= 9 for m, q in pos.items() if m != n): break
+    pos[n] = (px, py)
 # keep coalition outlines apart: if two coalitions' (padded) hulls touch, slide the smaller coalition
 # (its candidates, its endorsers and their one-candidate endorsers) directly away from the other.
 def _segd(p, a, b):
@@ -633,6 +642,8 @@ def public_notes(nd):
     if nd['type'] == 'Slate':
         mem = sorted(nodes[x]['name'] for x in nodes if nodes[x].get('memberOf') == nd['id'])
         if mem: out.append(f"Shared page for the slate\u2019s {len(mem)} candidates. Endorsers listed for the whole slate link here; endorsements of individual members link to that member.")
+    m = re.search(r'(Berkeley Scanner|Berkeleyside) reports (he|she|they) "([^"]+)" \((https?://[^)\s]+)\)', raw)
+    if m: out.append(dict(text=f'{SITE_NAMES.get(urlparse(m.group(4)).netloc.replace("www.", ""), m.group(1))} reports {m.group(2)} \u201c{m.group(3)}.\u201d', url=m.group(4)))
     if nd['isTarget'] and D_all.in_degree(nd['id']) == 0: out.append('No endorsements recorded.')
     return [x if isinstance(x, dict) else dict(text=x) for x in out]
 for nd in nodes.values():

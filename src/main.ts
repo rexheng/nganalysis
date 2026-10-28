@@ -41,7 +41,7 @@ async function main() {
     (edgesOut.get(e.s) || edgesOut.set(e.s, []).get(e.s)!).push(e);
     (edgesIn.get(e.t) || edgesIn.set(e.t, []).get(e.t)!).push(e);
   }
-  const isolated = d.nodes.filter((n) => n.inDeg + n.outDeg === 0 && !memberEdges.some((e) => e.s === n.id || e.t === n.id));
+  const isolated = d.nodes.filter((n) => !n.isTarget && n.inDeg + n.outDeg === 0 && !memberEdges.some((e) => e.s === n.id || e.t === n.id));
   const isoSet = new Set(isolated.map((n) => n.id));
   const MAXSEL = 5;   // nodes compared at once
   const state = { view: 'cands' as View, selected: null as string | null, multi: [] as string[], hovered: null as string | null, showAll: false,
@@ -432,10 +432,12 @@ async function main() {
   // ---------- panel helpers ----------
   const panel = $('#panel');
   const N = (id: string) => byId.get(id)!;
-  const typeBar = (tc: Map<string, number> | Record<string, number>) => {
+  const typeBar = (tc: Map<string, number> | Record<string, number>, via = 0) => {
     const m = tc instanceof Map ? tc : new Map(Object.entries(tc));
-    return `<div class="tbar" role="img" aria-label="${esc([...m].map(([t, v]) => `${v} ${t}`).join(', '))}">${TYPE_ORDER.filter((t) => m.has(t)).map((t) => `<span style="flex:${m.get(t)};background:${TYPE_RAMP[t]}" title="${esc(t)}: ${m.get(t)}"></span>`).join('')}</div>`;
+    return `<div class="tbar" role="img" aria-label="${esc([...m].map(([t, v]) => `${v} ${t}`).concat(via ? [`${via} via slate`] : []).join(', '))}">${TYPE_ORDER.filter((t) => m.has(t)).map((t) => `<span style="flex:${m.get(t)};background:${TYPE_RAMP[t]}" title="${esc(t)}: ${m.get(t)}"></span>`).join('')}${via ? `<span class="via" style="flex:${via}" title="Via slate: ${via}"></span>` : ''}</div>`;
   };
+  /** group endorsers of a slate member's slate that do not also endorse the member directly */
+  const viaSlate = (n: GNode) => { if (!n.memberOf) return 0; const own = new Set((edgesIn.get(n.id) || []).map((e) => e.s)); return (edgesIn.get(n.memberOf) || []).filter((e) => !own.has(e.s)).length; };
   const typeKey = (types: string[]) => `<p class="tkey small">${TYPE_ORDER.filter((t) => types.includes(t)).map((t) => `<span><i style="background:${TYPE_RAMP[t]}"></i>${esc(t)}</span>`).join('')}</p>`;
   // ---------- references: one number per source document, shared with the References list on /findings/ ----------
   const refByU = new Map(d.refs.map((r) => [r.u, r]));
@@ -537,13 +539,15 @@ async function main() {
     // with a filter on, list only the visible links and say how many of the total are shown
     const lead = (label: string, all: GEdge[], es: GEdge[], body: (cite: boolean) => string) => {
       const sr = sharedRef(es); use(es);
-      const num = label === 'Endorsed by' ? `${all.length} ${all.length === 1 ? 'group' : 'groups'}` : String(all.length);
+      const via = label === 'Endorsed by' ? viaSlate(n) : 0;
+      const num = label === 'Endorsed by' ? `${via ? `${via} via slate + ` : ''}${all.length} ${all.length === 1 ? 'group' : 'groups'}` : String(all.length);
       const cnt = es.length < all.length ? `<strong>${label} ${num}</strong> <span class="bsub">· ${es.length} shown (filter on)</span>` : `<strong>${label} ${num}</strong>`;
       return `<section class="lead"><div class="banner"><p class="bn">${cnt}</p>${bannerSrc(sr)}</div>${es.length ? body(!sr) : ''}</section>`;
     };
     const insV = ins.filter(shownE), outsV = outs.filter(shownE);
     if (ins.length) html += lead('Endorsed by', ins, insV, (cite) => endorserGroups(insV, cite));
-    else if (isC) html += `<div class="banner"><p class="bn"><strong>${n.inDegAll ? 'Endorsed by 0 groups' : 'No endorsements recorded'}</strong></p></div>`;
+    else if (isC && viaSlate(n)) html += `<div class="banner"><p class="bn"><strong>Endorsed through the slate only</strong> <span class="bsub">· ${viaSlate(n)} via slate</span></p></div>`;
+    else if (isC) html += `<div class="banner"><p class="bn"><strong>No group endorsements.</strong></p></div>`;
     if (outs.length) html += lead(ins.length ? 'Also endorses' : 'Endorses', outs, outsV, (cite) => targetRows(outsV, cite));
     if (notes) html += `<p class="small notes">${notes}</p>`;
     if (n.typeNote) html += `<p class="small muted">${esc(n.typeNote)}</p>`;
@@ -578,12 +582,14 @@ async function main() {
   function racePanel() {
     const r = d.races.find((x) => x.race === state.race)!;
     const opts = d.races.map((x) => `<button data-race="${esc(x.race)}" aria-pressed="${x.race === state.race}">${esc(x.race)}</button>`).join('');
-    const cands = r.candidates.map(N);
+    const grpRank = (n: GNode) => (n.type === 'Slate' ? 0 : n.memberOf ? 1 : 2);
+    const cands = r.candidates.map(N).sort((a, b) => grpRank(a) - grpRank(b) || (edgesIn.get(b.id) || []).length - (edgesIn.get(a.id) || []).length || a.name.localeCompare(b.name));
     const types = new Set<string>();
     const cards = cands.map((n) => {
-      const ins = edgesIn.get(n.id) || [];
+      const ins = edgesIn.get(n.id) || []; const via = viaSlate(n);
       const tc = new Map<string, number>(); for (const e of ins) { const t = N(e.s).type; types.add(t); tc.set(t, (tc.get(t) || 0) + 1); }
-      return `<li class="rc">${avatar(n, 'sm')}${nlink(n, undefined, 'strong')}<span class="num">${ins.length}</span>${ins.length ? typeBar(tc) : `<p class="small muted">${n.memberOf ? 'No individual endorsements; see the slate' : 'No endorsements recorded'}</p>`}</li>`;
+      const num = via ? (ins.length ? `${via} via slate + ${ins.length}` : `${via} via slate`) : String(ins.length);
+      return `<li class="rc">${avatar(n, 'sm')}${nlink(n, undefined, 'strong')}<span class="num">${num}</span>${ins.length || via ? typeBar(tc, via) : ''}${ins.length ? '' : `<p class="small muted">${via ? 'Endorsed through the slate only' : 'No endorsements recorded'}</p>`}</li>`;
     }).join('');
     const m = new Map<string, string[]>();
     for (const c of r.candidates) for (const e of edgesIn.get(c) || []) { if (!m.has(e.s)) m.set(e.s, []); m.get(e.s)!.push(c); }
