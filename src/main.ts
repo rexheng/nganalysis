@@ -441,7 +441,8 @@ async function main() {
   const refByU = new Map(d.refs.map((r) => [r.u, r]));
   const fmtDates = (at: string[]) => (!at.length ? '' : at.length === 1 ? fmtDate(at[0]) : `${fmtDate(at[0])} to ${fmtDate(at[at.length - 1])}`);
   const refNums = (e: GEdge) => [...new Set(e.src.map((x) => refByU.get(x.u)?.n).filter((n): n is number => !!n))].sort((a, b) => a - b);
-  const marker = (ns: number[]) => (ns.length ? `<sup class="rm">[${ns.map((n) => `<a href="#pref-${n}" data-ref="${n}" aria-label="Reference ${n}">${n}</a>`).join(',')}]</sup>` : '');
+  const refByN = new Map(d.refs.map((r) => [r.n, r]));
+  const marker = (ns: number[]) => (ns.length ? `<sup class="rm">[${ns.map((n) => { const r = refByN.get(n); const t = r ? r.title : `Reference ${n}`; return `<a href="${esc(r ? d.urls[r.u] : `#pref-${n}`)}" target="_blank" rel="noopener" data-ref="${n}" title="${esc(t)}" aria-label="Source ${n}: ${esc(t)} (opens in a new tab)">${n}</a>`; }).join(',')}]</sup>` : '');
   function refList(ns: Set<number>) {
     const rs = d.refs.filter((r) => ns.has(r.n));
     if (!rs.length) return '';
@@ -736,8 +737,7 @@ async function main() {
     const un = t.closest<HTMLElement>('[data-unsel]'); if (un) { setMulti(state.multi.filter((x) => x !== un.dataset.unsel), true); return; }
     if (t.closest('[data-clear]')) { select(null); return; }
     const rb = t.closest<HTMLElement>('[data-race]'); if (rb) { state.race = rb.dataset.race!; recompute(); refresh({ skipIndexation: true }); renderPanel(); syncHash(); return; }
-    const rf = t.closest<HTMLElement>('[data-ref]');
-    if (rf) { ev.preventDefault(); const li = panel.querySelector<HTMLElement>(`#pref-${rf.dataset.ref}`); if (li) { (li.closest('details') as HTMLDetailsElement | null)?.setAttribute('open', ''); li.scrollIntoView({ block: 'center' }); li.classList.add('flash'); setTimeout(() => li.classList.remove('flash'), 1200); } return; }
+    if (t.closest('[data-ref]')) return;   // citation numbers open their source in a new tab
     const sm = t.closest<HTMLButtonElement>('.showmore');
     if (sm) { sm.previousElementSibling?.querySelectorAll('li.more').forEach((li) => ((li as HTMLElement).hidden = false)); sm.remove(); }
   });

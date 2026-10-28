@@ -94,8 +94,12 @@ with sync_playwright() as p:
         if name in ('d1440', 'm390'): c['tregub_panel_text'] = pg.locator('#panel').inner_text()
         first = pg.locator('#panel a[data-ref]').first
         if first.count():
-            first.click() if not mob else first.tap(); pg.wait_for_timeout(700)
-            c['ref_click'] = pg.evaluate("(()=>{const li=document.querySelector('#panel .reflist li.flash');if(!li)return null;const r=li.getBoundingClientRect(),P=document.getElementById('panel').getBoundingClientRect();return {id:li.id, visible:r.top>=P.top-1&&r.bottom<=Math.max(P.bottom,innerHeight)+1, url:location.search}})()")
+            exp = first.get_attribute('href')
+            with pg.context.expect_page() as pop: first.click(modifiers=[]) if not mob else first.tap()
+            np_ = pop.value; opened = np_.url; np_.close()
+            c['ref_click'] = {'ref': first.get_attribute('data-ref'), 'href': exp, 'opened': opened, 'target': first.get_attribute('target'), 'rel': first.get_attribute('rel'),
+                              'label': first.get_attribute('aria-label'), 'ok': opened.rstrip('/') == exp.rstrip('/') or opened.startswith(exp.split('#')[0]), 'url': pg.evaluate('location.search')}
+            c['bad_cite_links'] = pg.evaluate("[...document.querySelectorAll('#panel a[data-ref]')].filter(a=>!/^https?:/.test(a.getAttribute('href'))||a.target!=='_blank'||!/noopener/.test(a.rel)||!a.title).length")
         c['unlabelled_neighbours_tregub'] = pg.evaluate("(()=>{const L=new Set(window.__labels||[]);const g=document.getElementById('graph').getBoundingClientRect();const inV=window.__test.nbrs().filter(id=>{const p=window.__test.pos(id);return p&&p.x>=0&&p.y>=0&&p.x<=g.width&&p.y<=g.height});return {neighbours: window.__test.nbrs().length, in_view: inV.length, in_view_unlabelled: inV.filter(id=>!L.has(id)).length, in_view_multi_unlabelled: inV.filter(id=>!L.has(id)&&!window.__test.leaf(id)).length}})()")
         pg.keyboard.press('Escape'); pg.wait_for_timeout(600)
         c['deselect_selected'] = pg.evaluate('window.__test.state.selected')
