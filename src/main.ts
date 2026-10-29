@@ -10,6 +10,7 @@ import {
   esc, index, nlink, typeGlyph, TYPE_ORDER, TYPE_RAMP, pct, raceShort, shortName, surname, onColor, initials,
   nodeColor, RACE_COLOR, GROUP_COLOR, GROUP_LABEL, groupOfType,
 } from './text';
+if (window.self !== window.top) document.documentElement.classList.add('embed');   // embedded in the write-up page
 
 const LEAF = '#c4c4c4', DIM = '#f1f1f1', DIM_BORDER = '#e2e2e2';
 type View = 'cands' | 'race';

@@ -238,7 +238,6 @@ body.app{display:flex;flex-direction:column;height:100dvh;overflow:hidden;font-f
   .sheet .tabs{margin:0 10px}
 }
 /* findings page */
-.draft{font:700 14px var(--sans);background:#fff3d6;color:#5c3c00;border-left:4px solid #b36b00;padding:8px 12px;margin:0 0 18px}
 .masthead .ab-row{max-width:700px}
 .findings p{margin:0 0 16px}
 .findings .coal-list{list-style:none;padding:0;margin:-6px 0 16px}
@@ -397,3 +396,10 @@ body.app{display:flex;flex-direction:column;height:100dvh;overflow:hidden;font-f
 .efind .efq::-webkit-search-cancel-button{display:none}
 .efind .efx{position:absolute;right:2px;top:2px;width:28px;height:28px;border:0;background:none;font-size:18px;line-height:1;color:#444;cursor:pointer}
 .efind .efnone{margin:6px 0 0}
+
+/* write-up page: the interactive graph embedded between the intro and the analysis */
+.story-cont{padding-top:8px}
+.embed-graph{margin:8px auto 24px}
+.embed-graph iframe{display:block;width:100%;height:min(78vh,760px);min-height:520px;border:1px solid #d6d6d6;border-radius:4px;background:#fff}
+.embed-graph figcaption{font-family:var(--sans);margin-top:6px}
+html.embed .apptitle,html.embed .storylink{display:none}

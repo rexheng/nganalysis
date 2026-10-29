@@ -164,8 +164,8 @@ export function buildTexts(d: Data): Texts {
   const nSlates = d.nodes.filter((n) => n.isTarget && n.type === 'Slate').length;
   const statsLine = `${S.nEndorsementEdges.toLocaleString('en-US')} endorsements · ${S.nEndorsers} endorsers · ${nRaces} races`;
   return {
-    headline, findings, statsLine, overviewAlt, overviewKey, graphSummary, strip,
+    headline: 'Who backs whom in Berkeley’s November 2026 election', findings, statsLine, overviewAlt, overviewKey, graphSummary, strip,
     title: 'Who backs whom in Berkeley’s November 2026 election | The Daily Californian',
-    description: `${headline}. An interactive network of endorsements in Berkeley’s November 2026 election.`,
+    description: 'The Daily Californian mapped which political groups and elected officials are backing which candidates.',
   };
 }

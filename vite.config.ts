@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { buildTexts, esc } from './src/text';
 import { methodsHtml, methodsMarkdown, referencesHtml } from './src/methods';
+import { writeupIntro, writeupAnalysis } from './src/writeup';
 import type { Data } from './src/types';
 
 // logo.dev publishable key: read from ../.env.local at build time only (gitignored, never committed or printed)
@@ -23,11 +24,10 @@ function bakeText(): Plugin {
       const d = load();
       const svg = (n: string) => readFileSync(new URL(`./src/generated/overview-${n}.svg`, import.meta.url), 'utf-8');
       const t = buildTexts(d);
-      const findings = t.findings.map((f, i) => (f.startsWith('<p') ? f : `<p>${f}</p>`) + (i === 0 && t.strip ? t.strip : '')).join('\n');
       return html
         .replace(/%TITLE%/g, esc(t.title)).replace(/%DESC%/g, esc(t.description)).replace(/%HEADLINE%/g, esc(t.headline))
         .replace('<!--HEADLINE-->', esc(t.headline)).replace('<!--STATS-->', esc(t.statsLine))
-        .replace('<!--FINDINGS-->', toGraphLinks(findings))
+        .replace('<!--WRITEUP_INTRO-->', writeupIntro).replace('<!--WRITEUP_ANALYSIS-->', writeupAnalysis)
         .replace('<!--OVERVIEW_WIDE-->', svg('wide')).replace('<!--OVERVIEW_NARROW-->', svg('narrow'))
         .replace('<!--OVERVIEW_KEY-->', t.overviewKey).replace('<!--OVERVIEW_ALT-->', esc(t.overviewAlt))
         .replace('<!--GRAPH_SUMMARY-->', esc(t.graphSummary))

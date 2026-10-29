@@ -223,8 +223,10 @@ with sync_playwright() as p:
         if True:   # axe at every width
             pg.add_script_tag(path='/tmp/axe-pkg/node_modules/axe-core/axe.min.js'); f['axe'] = pg.evaluate(AXE)
         # a findings name link opens the graph with that node selected
-        href = pg.locator('a.nlink').first.get_attribute('href'); pg.goto(URL + href); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(500)
-        f['name_link_opens'] = [href, pg.locator('#panel h2').first.inner_text()]
+        if pg.locator('a.nlink').count():   # the write-up itself carries no name links; only check when present
+            href = pg.locator('a.nlink').first.get_attribute('href'); pg.goto(URL + href); pg.wait_for_function('window.__ready === true'); pg.wait_for_timeout(500)
+            f['name_link_opens'] = [href, pg.locator('#panel h2').first.inner_text()]
+        f['embed_iframe'] = pg.evaluate("(()=>{const i=document.querySelector('.embed-graph iframe'); return i ? {src: i.getAttribute('src'), title: i.title} : null})()")
         report['errors'][name] = errs
         ctx.close()
     b.close()
