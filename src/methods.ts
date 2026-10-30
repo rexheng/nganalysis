@@ -17,13 +17,6 @@ export function methodsHtml(d: Data): string {
   const extra = [none.length ? `${listJoin(none.map((n) => esc(n.name)))} ${none.length === 1 ? 'has' : 'have'} no endorsements on record.` : '',
     ...wd.map((n) => `${esc(n.name)} withdrew and counts only as an endorser.`)].filter(Boolean).join(' ');
   return `
-<h2 id="methods">Methods</h2>
-<p>We counted ${S.nEndorsementEdges.toLocaleString('en-US')} endorsements by ${S.nEndorsers} people and groups of ${d.nodes.filter((n) => n.isTarget && n.type !== 'Slate' && !n.analysisEndorser).length} candidates and ${numWord(d.nodes.filter((n) => n.isTarget && n.type === 'Slate').length)} ${plural(d.nodes.filter((n) => n.isTarget && n.type === 'Slate').length, 'slate')}.</p>
-<ul class="mlist">
-<li><strong>Endorsement:</strong> a name on a candidate’s endorsement page, on an organization’s own list or in a candidate statement in the <a href="${esc(vig)}" rel="noopener" target="_blank">county voter guide</a>, as of ${esc(prettyDate(S.accessDates[0]))}. Where an organization publishes its own list, that list is the source. Excluded: the guide’s “I refer to the following residents” lists${S.nUnverifiedLeads ? ` and ${S.nUnverifiedLeads} claims no primary source confirms` : ''}.</li>
-<li><strong>Similarly endorsed:</strong> ranked by the number of group endorsers two candidates share.${ix.slate ? ` The slate counts as one participant, linked to its ${numWord(ix.slateMembers.length)} members.` : ''}</li>
-<li><strong>Caveat:</strong> campaign pages are self-reported and range from zero to ${Math.max(...d.nodes.filter((n) => n.isTarget).map((n) => n.inDeg))} names, so long lists look more central. An endorsement is a public signal, not money or votes.</li>
-</ul>
 <h2 id="data">Data</h2>
 <ul class="downloads">${nodl}<li><a href="/data/graph.json" download>Analysis (JSON)</a></li><li><a href="/data/METHODS.md" download>Full methods</a></li></ul>
 <p class="small muted">${extra ? `${extra} ` : ''}${S.nZeroEndorsersDropped && zd ? `The endorsers table omits ${S.nZeroEndorsersDropped} names that endorse no one: ${zd.pamphletOnly} appear only in the excluded lists, ${zd.candidates} are candidates${zd.other ? `, ${zd.other} other` : ''}. ` : ''}Built ${esc(builtPT(d))} Pacific time.</p>`;
@@ -90,6 +83,5 @@ export function referencesHtml(d: Data) {
     return `Accessed ${ds.length === 1 ? prettyDate(ds[0]) : `${prettyDate(ds[0])} to ${prettyDate(ds[ds.length - 1])}`}.`;
   };
   return `<h2 id="refs">References</h2>
-<ol class="reflist">${d.refs.map((r) => `<li id="ref-${r.n}"><span class="rt">${esc(r.title)}</span>. <a href="${esc(r.url)}" rel="noopener" target="_blank">${esc(r.url.replace(/^https?:\/\//, ''))}</a>. <span class="acc">${when(r.at)}</span></li>`).join('')}</ol>
-<p class="credit-logo"><a href="https://logo.dev">Logos provided by Logo.dev</a></p>`;
+<ol class="reflist">${d.refs.map((r) => `<li id="ref-${r.n}"><span class="rt">${esc(r.title)}</span>. <a href="${esc(r.url)}" rel="noopener" target="_blank">${esc(r.url.replace(/^https?:\/\//, ''))}</a>. <span class="acc">${when(r.at)}</span></li>`).join('')}</ol>`;
 }
